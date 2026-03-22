@@ -42,6 +42,21 @@ static int build_html_callback(void *data, int argc, char **argv, char **azColNa
     return 0;
 }
 
+static int build_json_callback(void *data, int argc, char **argv, char **azColName) {
+    RenderContext* ctx = (RenderContext*)data;
+
+    if (ctx->generatedHTML.length() > 0) ctx->generatedHTML += ",";
+
+    String name = argv[0] ? argv[0] : "Unknown";
+    String isFolder = argv[1] ? argv[1] : "0";
+    String size = argv[2] ? argv[2] : "0";
+
+    // Build a JSON object for this file/folder
+    ctx->generatedHTML += "{\"name\":\"" + name + "\",\"isFolder\":" + isFolder + ",\"size\":" + size + "}";
+
+    return 0;
+}
+
 String getParentDir(String path) {
     if (path == "/" || path == "") return "/";
     int lastSlash = path.lastIndexOf('/');
@@ -99,6 +114,23 @@ void handleRoot() {
     server.send(200, "text/html", html);
 }
 
+void handleApiList() {
+    RenderContext context;
+    context.generatedHTML = "";
+
+    context.currentPath = server.hasArg("dir") ? server.arg("dir") : "/";
+    indexInternalDrive(context.currentPath);
+
+    char *query = sqlite3_mprintf("SELECT NAME, IS_FOLDER, SIZE FROM FILES WHERE PARENT_DIR='%q' ORDER BY IS_FOLDER DESC, NAME ASC;", context.currentPath.c_str());
+    sqlite3_exec(db, query, build_json_callback, (void*)&context, NULL);
+    sqlite3_free(query);
+
+    // Wrap the array of files inside a main JSON object
+    String json = "{\"dir\":\"" + context.currentPath + "\",\"files\":[" + context.generatedHTML + "]}";
+    
+    server.send(200, "application/json", json);
+}
+
 void handleDownload() {
     if (server.hasArg("file")) {
         String path = server.arg("file");
@@ -113,6 +145,28 @@ void handleDownload() {
         }
     }
     server.send(404, "text/plain", "File Not Found");
+}
+
+String getContentType(String filename) {
+    if (filename.endsWith(".html")) return "text/html";
+    else if (filename.endsWith(".css")) return "text/css";
+    else if (filename.endsWith(".js")) return "application/javascript";
+    else if (filename.endsWith(".png")) return "image/png";
+    else if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) return "image/jpeg";
+    else if (filename.endsWith(".ico")) return "image/x-icon";
+    return "text/plain";
+}
+
+void handleStaticWebFiles() {
+    String path = server.uri(); // Gets the requested path, e.g., "/style.css"
+    
+    if (SD_MMC.exists(path)) {
+        File file = SD_MMC.open(path, "r");
+        server.streamFile(file, getContentType(path));
+        file.close();
+        return;
+    }
+    server.send(404, "text/plain", "404: File Not Found");
 }
 
 void handleDelete() {
@@ -165,6 +219,7 @@ void handleUpload() {
 
 void initWebServer() {
     server.on("/", handleRoot);
+    server.on("/api/list", HTTP_GET, handleApiList);
     server.on("/download", HTTP_GET, handleDownload);
     server.on("/delete", HTTP_GET, handleDelete);
 
@@ -173,6 +228,9 @@ void initWebServer() {
         server.sendHeader("Location", "/?dir=" + redir);
         server.send(303);
     }, handleUpload);
+
+    // If the route isn't defined above, check if it's a file on the drive
+    server.onNotFound(handleStaticWebFiles);
 
     server.begin();
     Serial.println("Web Server Ready. Go to 192.168.4.1");
