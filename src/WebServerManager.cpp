@@ -57,61 +57,14 @@ static int build_json_callback(void *data, int argc, char **argv, char **azColNa
     return 0;
 }
 
-String getParentDir(String path) {
-    if (path == "/" || path == "") return "/";
-    int lastSlash = path.lastIndexOf('/');
-    if (lastSlash == 0) return "/";
-    return path.substring(0, lastSlash);
-}
-
 void handleRoot() {
-    String clientIP = server.client().remoteIP().toString();
-    RenderContext context;
-    context.generatedHTML = "";
-
-    context.currentPath = server.hasArg("dir") ? server.arg("dir") : "/";
-    indexInternalDrive(context.currentPath);
-
-    char *query = sqlite3_mprintf("SELECT NAME, IS_FOLDER, SIZE FROM FILES WHERE PARENT_DIR='%q' ORDER BY IS_FOLDER DESC, NAME ASC;", context.currentPath.c_str());
-    sqlite3_exec(db, query, build_html_callback, (void*)&context, NULL);
-    sqlite3_free(query);
-
-    String html = "<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-    html += "<title>ESP32 NAS</title>";
-    html += "<style>body { background-color: #202020; color: #ffffff; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; } .container { max-width: 800px; margin: auto; } .file-box { background-color: #2d2d2d; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin-bottom: 20px;} .upload-box { background-color: #2d2d2d; border-radius: 8px; padding: 15px; text-align: center; } input[type='file'] { color: white; margin-right: 10px; } button { background-color: #4daafc; color: #000; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; }</style></head><body>";
-
-    html += "<div class='container'>";
-    html +=   "<div style='border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: baseline;'>";
-    html +=     "<h2>Index of: " + context.currentPath + "</h2>";
-    html +=     "<span style='color: #aaa; font-size: 14px;'>IP: " + clientIP + "</span>";
-    html +=   "</div>";
-
-    html +=   "<div class='file-box'>";
-
-    if (context.currentPath != "/") {
-        String parent = getParentDir(context.currentPath);
-        html += "<div style='padding: 12px; border-bottom: 1px solid #333;'>";
-        html += "📁 <a href='/?dir=" + parent + "' style='color: #fff; text-decoration: none; margin-left: 15px;'><b>.. (Up one level)</b></a>";
-        html += "</div>";
-    }
-
-    if (context.generatedHTML == "") {
-        html += "<p style='color: #888; text-align: center; padding: 10px;'>Folder is empty.</p>";
+    if (SD_MMC.exists("/index.html")) {
+        File file = SD_MMC.open("/index.html", "r");
+        server.streamFile(file, "text/html");
+        file.close();
     } else {
-        html += context.generatedHTML;
+        server.send(404, "text/plain", "Missing index.html on drive. Please upload it.");
     }
-    html +=   "</div>";
-
-    html += "<div class='upload-box'>";
-    html +=   "<h3>Upload File to Current Folder</h3>";
-    html +=   "<form method='POST' action='/upload?dir=" + context.currentPath + "' enctype='multipart/form-data'>";
-    html +=     "<input type='file' name='upload_file' required>";
-    html +=     "<button type='submit'>Upload File</button>";
-    html +=   "</form>";
-    html += "</div>";
-
-    html += "</div></body></html>";
-    server.send(200, "text/html", html);
 }
 
 void handleApiList() {
@@ -187,9 +140,7 @@ void handleDelete() {
         }
     }
 
-    String redir = server.hasArg("dir") ? server.arg("dir") : "/";
-    server.sendHeader("Location", "/?dir=" + redir);
-    server.send(303);
+    server.send(200, "text/plain", "Deleted successfully");
 }
 
 void handleUpload() {
@@ -224,9 +175,7 @@ void initWebServer() {
     server.on("/delete", HTTP_GET, handleDelete);
 
     server.on("/upload", HTTP_POST, []() {
-        String redir = server.hasArg("dir") ? server.arg("dir") : "/";
-        server.sendHeader("Location", "/?dir=" + redir);
-        server.send(303);
+        server.send(200, "text/plain", "Upload complete");
     }, handleUpload);
 
     // If the route isn't defined above, check if it's a file on the drive
