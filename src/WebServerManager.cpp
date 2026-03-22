@@ -50,9 +50,14 @@ static int build_json_callback(void *data, int argc, char **argv, char **azColNa
     String name = argv[0] ? argv[0] : "Unknown";
     String isFolder = argv[1] ? argv[1] : "0";
     String size = argv[2] ? argv[2] : "0";
+    String parentDir = (argc > 3 && argv[3]) ? argv[3] : "";
 
     // Build a JSON object for this file/folder
-    ctx->generatedHTML += "{\"name\":\"" + name + "\",\"isFolder\":" + isFolder + ",\"size\":" + size + "}";
+    ctx->generatedHTML += "{\"name\":\"" + name + "\",\"isFolder\":" + isFolder + ",\"size\":" + size;
+    if (parentDir.length() > 0) {
+        ctx->generatedHTML += ",\"parentDir\":\"" + parentDir + "\"";
+    }
+    ctx->generatedHTML += "}";
 
     return 0;
 }
@@ -81,6 +86,23 @@ void handleApiList() {
     // Wrap the array of files inside a main JSON object
     String json = "{\"dir\":\"" + context.currentPath + "\",\"files\":[" + context.generatedHTML + "]}";
     
+    server.send(200, "application/json", json);
+}
+
+void handleApiSearch() {
+    RenderContext context;
+    context.generatedHTML = "";
+
+    String queryStr = server.hasArg("q") ? server.arg("q") : "";
+
+    // We request a 4th column (PARENT_DIR) so the frontend knows where the file is.
+    // %% is how we escape the % wildcard in mprintf, and %q safely escapes the user's input!
+    char *query = sqlite3_mprintf("SELECT NAME, IS_FOLDER, SIZE, PARENT_DIR FROM FILES WHERE NAME LIKE '%%%q%%' ORDER BY IS_FOLDER DESC, NAME ASC LIMIT 100;", queryStr.c_str());
+    sqlite3_exec(db, query, build_json_callback, (void*)&context, NULL);
+    sqlite3_free(query);
+
+    // Return the results
+    String json = "{\"query\":\"" + queryStr + "\",\"files\":[" + context.generatedHTML + "]}";
     server.send(200, "application/json", json);
 }
 
@@ -171,6 +193,7 @@ void handleUpload() {
 void initWebServer() {
     server.on("/", handleRoot);
     server.on("/api/list", HTTP_GET, handleApiList);
+    server.on("/api/search", HTTP_GET, handleApiSearch);
     server.on("/download", HTTP_GET, handleDownload);
     server.on("/delete", HTTP_GET, handleDelete);
 

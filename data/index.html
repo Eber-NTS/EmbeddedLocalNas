@@ -16,8 +16,12 @@
 <body>
 
 <div class="container">
-    <div style="border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: baseline;">
-        <h2 id="current-dir-header">Loading...</h2>
+    <div style="border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <h2 id="current-dir-header" style="margin: 0;">Loading...</h2>
+        <div style="display: flex; gap: 5px;">
+            <input type="text" id="search-input" placeholder="Search files..." style="padding: 8px; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: white;">
+            <button onclick="performSearch()" style="background-color: #4daafc; padding: 8px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Search</button>
+        </div>
     </div>
 
     <div class="file-box" id="file-list">
@@ -37,11 +41,16 @@
 <script>
     let currentDirectory = "/";
     let lastDataJson = "";
+    let isSearching = false;
+    let currentSearchQuery = "";
 
 
     async function loadDirectory(path, pushHistory = true) {
+        isSearching = false;
+        if (currentDirectory !== path) {
+            lastDataJson = "";
+        }
         currentDirectory = path;
-        
 
         if (pushHistory) {
             window.history.pushState({ path: path }, "", "?dir=" + path);
@@ -117,8 +126,90 @@
         if (!confirm(`Are you sure you want to delete ${name}?`)) return;
         
         await fetch(`/delete?file=${path}`, { method: 'GET' });
+        lastDataJson = ""; // Force re-render
         loadDirectory(currentDirectory, false); // Instantly refresh folder list
     }
+    
+    // Specialized delete function for the search view
+    async function deleteSearchItem(path, name) {
+        if (!confirm(`Are you sure you want to delete ${name}?`)) return;
+        
+        await fetch(`/delete?file=${path}`, { method: 'GET' });
+        lastDataJson = ""; // Force re-render
+        performSearch(currentSearchQuery); // Instantly refresh search results
+    }
+
+    async function performSearch(query) {
+        const q = query || document.getElementById('search-input').value;
+        if (!q) {
+            loadDirectory(currentDirectory);
+            return;
+        }
+
+        isSearching = true;
+        currentSearchQuery = q;
+        document.getElementById('current-dir-header').innerText = "Search results for: " + q;
+
+        try {
+            const response = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+            const data = await response.json();
+
+            const currentDataJson = JSON.stringify(data);
+            if (currentDataJson !== lastDataJson) {
+                lastDataJson = currentDataJson;
+                renderSearchResults(data.files);
+            }
+        } catch (err) {
+            console.error("Search failed", err);
+        }
+    }
+
+    function renderSearchResults(files) {
+        const fileListDiv = document.getElementById('file-list');
+        let html = `
+            <div class="file-row">
+                <span class="back-btn" onclick="loadDirectory(currentDirectory)">⬅️ Back to folder</span>
+            </div>
+        `;
+
+        if (files.length === 0) {
+            fileListDiv.innerHTML = html + "<p style='color: #888; text-align: center; padding: 10px;'>No files found.</p>";
+            return;
+        }
+
+        files.forEach(file => {
+            const icon = file.isFolder ? "📁" : "📄";
+            const sizeText = file.isFolder ? "--" : Math.floor(file.size / 1024) + " KB";
+            let itemPath = file.parentDir.endsWith("/") ? file.parentDir + file.name : file.parentDir + "/" + file.name;
+
+            let primaryAction = file.isFolder 
+                ? `<span class="action-link" style="color: #fce84d;" onclick="loadDirectory('${itemPath}')">Open</span>`
+                : `<a class="action-link" style="color: #4daafc;" href="/download?file=${itemPath}">Download</a>`;
+                
+            let deleteAction = `<span class="action-link" style="color: #ff4d4d;" onclick="deleteSearchItem('${itemPath}', '${file.name}')">Delete</span>`;
+
+            html += `
+                <div class="file-row">
+                    <div style="flex: 2; display: flex; align-items: center;">
+                        <div style="display: flex; flex-direction: column;">
+                            <div style="display: flex; align-items: center;">
+                                <span style="font-size: 24px; margin-right: 15px;">${icon}</span>${file.name}
+                            </div>
+                            <small style="color: #666; margin-left: 39px;">${file.parentDir}</small>
+                        </div>
+                    </div>
+                    <div style="flex: 1; color: #aaa;">${sizeText}</div>
+                    <div style="flex: 1; text-align: right;">${primaryAction}${deleteAction}</div>
+                </div>
+            `;
+        });
+        fileListDiv.innerHTML = html;
+    }
+
+    // Allow hitting "Enter" on the keyboard to trigger the search
+    document.getElementById('search-input').addEventListener('keypress', function (e) {
+        if (e.key === 'Enter') performSearch();
+    });
 
     window.addEventListener("popstate", (event) => {
         if (event.state && event.state.path) {
@@ -137,14 +228,24 @@
         const formData = new FormData();
         formData.append('upload_file', fileInput.files[0]);
 
-        await fetch(`/upload?dir=${currentDirectory}`, {
-            method: 'POST',
-            body: formData
-        });
-        
+        const submitBtn = e.target.querySelector('button');
+        submitBtn.disabled = true;
+        submitBtn.innerText = "Uploading...";
 
-        fileInput.value = "";
-        loadDirectory(currentDirectory, false);
+        try {
+            await fetch(`/upload?dir=${currentDirectory}`, {
+                method: 'POST',
+                body: formData
+            });
+            fileInput.value = "";
+            lastDataJson = ""; // Force re-render
+            await loadDirectory(currentDirectory, false);
+        } catch (err) {
+            alert("Upload failed");
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.innerText = "Upload";
+        }
     });
 
 
@@ -154,7 +255,11 @@
 
 
     setInterval(() => {
-        loadDirectory(currentDirectory, false);
+        if (isSearching) {
+            performSearch(currentSearchQuery);
+        } else {
+            loadDirectory(currentDirectory, false);
+        }
     }, 3000);
 
 </script>
