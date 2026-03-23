@@ -6,6 +6,31 @@
 WebServer server(80);
 File fsUploadFile;
 
+// --- Authentication Configuration ---
+const char* WEB_PASSWORD = "admin"; // Change this to your desired password!
+const char* AUTH_COOKIE = "ESP32_SESSION=authenticated";
+
+bool isAuthenticated() {
+    if (server.hasHeader("Cookie")) {
+        String cookie = server.header("Cookie");
+        if (cookie.indexOf(AUTH_COOKIE) != -1) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void handleLogin() {
+    if (server.hasArg("password") && server.arg("password") == WEB_PASSWORD) {
+        server.sendHeader("Set-Cookie", String(AUTH_COOKIE) + "; Path=/; HttpOnly");
+        server.sendHeader("Location", "/");
+        server.send(303);
+    } else {
+        server.sendHeader("Location", "/login.html?error=1");
+        server.send(303);
+    }
+}
+
 struct RenderContext {
     String currentPath;
     String generatedHTML;
@@ -63,6 +88,12 @@ static int build_json_callback(void *data, int argc, char **argv, char **azColNa
 }
 
 void handleRoot() {
+    if (!isAuthenticated()) {
+        server.sendHeader("Location", "/login.html");
+        server.send(303);
+        return;
+    }
+
     if (SD_MMC.exists("/index.html")) {
         File file = SD_MMC.open("/index.html", "r");
         server.streamFile(file, "text/html");
@@ -73,6 +104,8 @@ void handleRoot() {
 }
 
 void handleApiList() {
+    if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
+
     RenderContext context;
     context.generatedHTML = "";
 
@@ -90,6 +123,8 @@ void handleApiList() {
 }
 
 void handleApiSearch() {
+    if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
+
     RenderContext context;
     context.generatedHTML = "";
 
@@ -107,6 +142,8 @@ void handleApiSearch() {
 }
 
 void handleDownload() {
+    if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
+
     if (server.hasArg("file")) {
         String path = server.arg("file");
         if (!path.startsWith("/")) path = "/" + path;
@@ -135,6 +172,13 @@ String getContentType(String filename) {
 void handleStaticWebFiles() {
     String path = server.uri(); // Gets the requested path, e.g., "/style.css"
     
+    // Allow access to login.html, but block everything else if not authenticated
+    if (path != "/login.html" && !isAuthenticated()) {
+        server.sendHeader("Location", "/login.html");
+        server.send(303);
+        return;
+    }
+
     if (SD_MMC.exists(path)) {
         File file = SD_MMC.open(path, "r");
         server.streamFile(file, getContentType(path));
@@ -145,6 +189,8 @@ void handleStaticWebFiles() {
 }
 
 void handleDelete() {
+    if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
+
     if (server.hasArg("file")) {
         String path = server.arg("file");
         if (!path.startsWith("/")) path = "/" + path;
@@ -166,6 +212,8 @@ void handleDelete() {
 }
 
 void handleUpload() {
+    if (!isAuthenticated()) return; // Abort saving if not authenticated
+
     HTTPUpload& upload = server.upload();
 
     if (upload.status == UPLOAD_FILE_START) {
@@ -191,6 +239,12 @@ void handleUpload() {
 }
 
 void initWebServer() {
+    // Instruct the server to keep track of Cookie headers
+    const char* headerkeys[] = {"Cookie"};
+    size_t headerkeyssize = sizeof(headerkeys) / sizeof(char*);
+    server.collectHeaders(headerkeys, headerkeyssize);
+
+    server.on("/login", HTTP_POST, handleLogin);
     server.on("/", handleRoot);
     server.on("/api/list", HTTP_GET, handleApiList);
     server.on("/api/search", HTTP_GET, handleApiSearch);
@@ -198,6 +252,7 @@ void initWebServer() {
     server.on("/delete", HTTP_GET, handleDelete);
 
     server.on("/upload", HTTP_POST, []() {
+        if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
         server.send(200, "text/plain", "Upload complete");
     }, handleUpload);
 

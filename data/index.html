@@ -21,6 +21,7 @@
         <div style="display: flex; gap: 5px;">
             <input type="text" id="search-input" placeholder="Search files..." style="padding: 8px; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: white;">
             <button onclick="performSearch()" style="background-color: #4daafc; padding: 8px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Search</button>
+            <button onclick="logout()" style="background-color: #ff4d4d; padding: 8px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; margin-left: 10px;">Logout</button>
         </div>
     </div>
 
@@ -60,6 +61,11 @@
 
         try {
             const response = await fetch(`/api/list?dir=${path}`);
+            if (response.status === 401) {
+                window.location.href = "/login.html";
+                return;
+            }
+
             const data = await response.json();
             
             // Only re-render if the data has changed to prevent flickering from setInterval
@@ -152,6 +158,11 @@
 
         try {
             const response = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+            if (response.status === 401) {
+                window.location.href = "/login.html";
+                return;
+            }
+
             const data = await response.json();
 
             const currentDataJson = JSON.stringify(data);
@@ -206,6 +217,12 @@
         fileListDiv.innerHTML = html;
     }
 
+    // Clears the cookie and reloads the page (which kicks them to login)
+    function logout() {
+        document.cookie = "ESP32_SESSION=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+        window.location.href = "/login.html";
+    }
+
     // Allow hitting "Enter" on the keyboard to trigger the search
     document.getElementById('search-input').addEventListener('keypress', function (e) {
         if (e.key === 'Enter') performSearch();
@@ -233,10 +250,15 @@
         submitBtn.innerText = "Uploading...";
 
         try {
-            await fetch(`/upload?dir=${currentDirectory}`, {
+            const response = await fetch(`/upload?dir=${currentDirectory}`, {
                 method: 'POST',
                 body: formData
             });
+            
+            if (response.status === 401) {
+                window.location.href = "/login.html";
+                return;
+            }
             fileInput.value = "";
             lastDataJson = ""; // Force re-render
             await loadDirectory(currentDirectory, false);
