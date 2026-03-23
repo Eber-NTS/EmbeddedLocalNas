@@ -6,8 +6,8 @@
 WebServer server(80);
 File fsUploadFile;
 
-// --- Authentication Configuration ---
-const char* WEB_PASSWORD = "admin"; // Change this to your desired password!
+
+const char* WEB_PASSWORD = "admin";
 const char* AUTH_COOKIE = "ESP32_SESSION=authenticated";
 
 bool isAuthenticated() {
@@ -77,7 +77,7 @@ static int build_json_callback(void *data, int argc, char **argv, char **azColNa
     String size = argv[2] ? argv[2] : "0";
     String parentDir = (argc > 3 && argv[3]) ? argv[3] : "";
 
-    // Build a JSON object for this file/folder
+
     ctx->generatedHTML += "{\"name\":\"" + name + "\",\"isFolder\":" + isFolder + ",\"size\":" + size;
     if (parentDir.length() > 0) {
         ctx->generatedHTML += ",\"parentDir\":\"" + parentDir + "\"";
@@ -116,7 +116,7 @@ void handleApiList() {
     sqlite3_exec(db, query, build_json_callback, (void*)&context, NULL);
     sqlite3_free(query);
 
-    // Wrap the array of files inside a main JSON object
+
     String json = "{\"dir\":\"" + context.currentPath + "\",\"files\":[" + context.generatedHTML + "]}";
     
     server.send(200, "application/json", json);
@@ -130,13 +130,12 @@ void handleApiSearch() {
 
     String queryStr = server.hasArg("q") ? server.arg("q") : "";
 
-    // We request a 4th column (PARENT_DIR) so the frontend knows where the file is.
-    // %% is how we escape the % wildcard in mprintf, and %q safely escapes the user's input!
+
     char *query = sqlite3_mprintf("SELECT NAME, IS_FOLDER, SIZE, PARENT_DIR FROM FILES WHERE NAME LIKE '%%%q%%' ORDER BY IS_FOLDER DESC, NAME ASC LIMIT 100;", queryStr.c_str());
     sqlite3_exec(db, query, build_json_callback, (void*)&context, NULL);
     sqlite3_free(query);
 
-    // Return the results
+
     String json = "{\"query\":\"" + queryStr + "\",\"files\":[" + context.generatedHTML + "]}";
     server.send(200, "application/json", json);
 }
@@ -170,9 +169,7 @@ String getContentType(String filename) {
 }
 
 void handleStaticWebFiles() {
-    String path = server.uri(); // Gets the requested path, e.g., "/style.css"
-    
-    // Allow access to login.html, but block everything else if not authenticated
+    String path = server.uri();
     if (path != "/login.html" && !isAuthenticated()) {
         server.sendHeader("Location", "/login.html");
         server.send(303);
@@ -212,7 +209,7 @@ void handleDelete() {
 }
 
 void handleUpload() {
-    if (!isAuthenticated()) return; // Abort saving if not authenticated
+    if (!isAuthenticated()) return;
 
     HTTPUpload& upload = server.upload();
 
@@ -239,7 +236,7 @@ void handleUpload() {
 }
 
 void initWebServer() {
-    // Instruct the server to keep track of Cookie headers
+
     const char* headerkeys[] = {"Cookie"};
     size_t headerkeyssize = sizeof(headerkeys) / sizeof(char*);
     server.collectHeaders(headerkeys, headerkeyssize);
@@ -256,7 +253,6 @@ void initWebServer() {
         server.send(200, "text/plain", "Upload complete");
     }, handleUpload);
 
-    // If the route isn't defined above, check if it's a file on the drive
     server.onNotFound(handleStaticWebFiles);
 
     server.begin();

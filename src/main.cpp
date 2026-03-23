@@ -6,7 +6,7 @@
 #include "WebServerManager.h"
 
 const char* ssid = "Esp32_Server";
-const char* password = "HelloWorld124";
+const char* password = "helloworld";
 
 void setup() {
     Serial.begin(115200);
