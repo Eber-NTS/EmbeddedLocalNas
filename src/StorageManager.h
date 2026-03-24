@@ -4,3 +4,4 @@
 
 bool initStorage();
 bool deleteFolderRecursive(String dirPath);
+bool deleteFileOrFolder(String path);

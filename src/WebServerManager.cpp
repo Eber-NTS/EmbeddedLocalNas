@@ -36,37 +36,6 @@ struct RenderContext {
     String generatedHTML;
 };
 
-static int build_html_callback(void *data, int argc, char **argv, char **azColName) {
-    RenderContext* ctx = (RenderContext*)data;
-
-    String name = argv[0] ? argv[0] : "Unknown";
-    String isFolder = argv[1] ? argv[1] : "0";
-    String size = argv[2] ? argv[2] : "0";
-
-    String icon = (isFolder == "1") ? "📁" : "📄";
-    String sizeText = (isFolder == "1") ? "--" : String(size.toInt() / 1024) + " KB";
-
-    String itemPath = ctx->currentPath;
-    if (!itemPath.endsWith("/")) itemPath += "/";
-    itemPath += name;
-
-    String primaryAction;
-    if (isFolder == "1") {
-        primaryAction = "<a href='/?dir=" + itemPath + "' style='color: #fce84d; text-decoration: none; margin-right: 15px;'>Open</a>";
-    } else {
-        primaryAction = "<a href='/download?file=" + itemPath + "' style='color: #4daafc; text-decoration: none; margin-right: 15px;'>Download</a>";
-    }
-    String deleteAction = "<a href='/delete?file=" + itemPath + "&dir=" + ctx->currentPath + "' style='color: #ff4d4d; text-decoration: none;' onclick=\"return confirm('Delete " + name + "?');\">Delete</a>";
-
-    ctx->generatedHTML += "<div style='display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #333;'>";
-    ctx->generatedHTML +=   "<div style='flex: 2; display: flex; align-items: center;'><span style='font-size: 24px; margin-right: 15px;'>" + icon + "</span>" + name + "</div>";
-    ctx->generatedHTML +=   "<div style='flex: 1; color: #aaa;'>" + sizeText + "</div>";
-    ctx->generatedHTML +=   "<div style='flex: 1; text-align: right;'>" + primaryAction + deleteAction + "</div>";
-    ctx->generatedHTML += "</div>";
-
-    return 0;
-}
-
 static int build_json_callback(void *data, int argc, char **argv, char **azColName) {
     RenderContext* ctx = (RenderContext*)data;
 
@@ -192,20 +161,13 @@ void handleDelete() {
         String path = server.arg("file");
         if (!path.startsWith("/")) path = "/" + path;
 
-        if (SD_MMC.exists(path)) {
-            File f = SD_MMC.open(path);
-            bool isDir = f.isDirectory();
-            f.close();
-
-            if (isDir) {
-                deleteFolderRecursive(path);
-            } else {
-                SD_MMC.remove(path);
-            }
+        if (deleteFileOrFolder(path)) {
+            server.send(200, "text/plain", "Deleted successfully");
+            return;
         }
     }
 
-    server.send(200, "text/plain", "Deleted successfully");
+    server.send(500, "text/plain", "Failed to delete");
 }
 
 void handleUpload() {

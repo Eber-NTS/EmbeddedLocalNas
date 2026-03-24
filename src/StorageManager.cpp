@@ -1,6 +1,7 @@
 #include "StorageManager.h"
 
 bool initStorage() {
+
     SD_MMC.setPins(39, 38, 40);
     if (!SD_MMC.begin("/sdcard", true)) {
         return false;
@@ -30,4 +31,20 @@ bool deleteFolderRecursive(String dirPath) {
     dir.close();
 
     return SD_MMC.rmdir(dirPath);
+}
+
+bool deleteFileOrFolder(String path) {
+    if (!SD_MMC.exists(path)) {
+        return false;
+    }
+
+    File f = SD_MMC.open(path);
+    bool isDir = f.isDirectory();
+    f.close();
+
+    if (isDir) {
+        return deleteFolderRecursive(path);
+    } else {
+        return SD_MMC.remove(path);
+    }
 }
