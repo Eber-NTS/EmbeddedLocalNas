@@ -29,7 +29,7 @@
 
     </div>
 
-    <!-- Simple upload form -->
+
     <div style="background-color: #2d2d2d; border-radius: 8px; padding: 15px; text-align: center;">
         <h3>Upload File</h3>
         <form id="upload-form">
@@ -40,25 +40,32 @@
 </div>
 
 <script>
-    let currentDirectory = "/";
-    let lastDataJson = "";
-    let isSearching = false;
-    let currentSearchQuery = "";
+    // Global variables:
+    let currentDirectory = "/"; //Remembers the current folder being viewed
+    let lastDataJson = ""; //stores a text copy of the last data the esp32 sent. Used to check if anything has actually changed before redrawing the screen. Prevents the screen from flickering every 3 seconds.
+    let isSearching = false; //Keeps track if the user is currently looking at search results rather than a standard folder
+    let currentSearchQuery = ""; //keeps track of what query was requested
 
 
+
+    //Asks the esp32 for the contents of a specific folder.
     async function loadDirectory(path, pushHistory = true) {
-        isSearching = false;
-        if (currentDirectory !== path) {
-            lastDataJson = "";
-        }
-        currentDirectory = path;
 
+        isSearching = false;  //Search mode is used for refreshing to a search directory. Folder mode is used for refreshing currant folder.
+        if (currentDirectory !== path) { //checks if the user wants to look at a different path than from the current one.
+            lastDataJson = "";// if the user is going to a new folder
+        }
+        currentDirectory = path; //updates the current path being tracked. Remembers the folder that was just clicked.
+
+        //Updates the browser's URL using window.History.pushState
         if (pushHistory) {
-            window.history.pushState({ path: path }, "", "?dir=" + path);
+            window.history.pushState({ path: path }, "", "?dir=" + path);//built-in browser feature that tells the browser to change the URL address bar and save it to the user's history. Does not actually reload the page.
         }
-
+        //searches the html document for the target id="current-dir-header". located in <h2>
+        //changes the visible text inside the header to match the new folder just opened.
         document.getElementById('current-dir-header').innerText = "Index of: " + path;
 
+        //
         try {
             const response = await fetch(`/api/list?dir=${path}`);
             if (response.status === 401) {

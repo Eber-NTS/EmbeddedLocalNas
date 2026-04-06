@@ -1,5 +1,6 @@
 #include "StorageManager.h"
 
+//mounts appropriate pins for microSSD component
 bool initStorage() {
 
     SD_MMC.setPins(39, 38, 40);
