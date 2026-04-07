@@ -89,8 +89,9 @@ static int build_json_callback(void *data, int argc, char **argv, char **azColNa
     String isFolder = argv[1] ? argv[1] : "0";
     String size = argv[2] ? argv[2] : "0";
     String parentDir = (argc > 3 && argv[3]) ? argv[3] : "";
+    String lastMod = (argc > 4 && argv[4]) ? argv[4] : "0";
 
-    ctx->generatedHTML += "{\"name\":\"" + name + "\",\"isFolder\":" + isFolder + ",\"size\":" + size;
+    ctx->generatedHTML += "{\"name\":\"" + name + "\",\"isFolder\":" + isFolder + ",\"size\":" + size + ",\"lastMod\":" + lastMod;
     if (parentDir.length() > 0) {
         ctx->generatedHTML += ",\"parentDir\":\"" + parentDir + "\"";
     }
@@ -122,7 +123,14 @@ void handleApiList() {
     context.currentPath = server.hasArg("dir") ? server.arg("dir") : "/";
     indexInternalDrive(context.currentPath);
 
-    char *query = sqlite3_mprintf("SELECT NAME, IS_FOLDER, SIZE FROM FILES WHERE PARENT_DIR='%q' ORDER BY IS_FOLDER DESC, NAME ASC;", context.currentPath.c_str());
+    String sortOrder = server.hasArg("sort") ? server.arg("sort") : "name_asc";
+    String sqlSort = "NAME ASC";
+    if (sortOrder == "name_desc") sqlSort = "NAME DESC";
+    else if (sortOrder == "date_desc") sqlSort = "LAST_MODIFIED DESC";
+    else if (sortOrder == "date_asc") sqlSort = "LAST_MODIFIED ASC";
+
+    // We use NULL for parent_dir so that LAST_MODIFIED is perfectly aligned at index 4 for our callback
+    char *query = sqlite3_mprintf("SELECT NAME, IS_FOLDER, SIZE, NULL, LAST_MODIFIED FROM FILES WHERE PARENT_DIR='%q' ORDER BY IS_FOLDER DESC, %s;", context.currentPath.c_str(), sqlSort.c_str());
     sqlite3_exec(db, query, build_json_callback, (void*)&context, NULL);
     sqlite3_free(query);
 
@@ -138,8 +146,13 @@ void handleApiSearch() {
     context.generatedHTML = "";
 
     String queryStr = server.hasArg("q") ? server.arg("q") : "";
+    String sortOrder = server.hasArg("sort") ? server.arg("sort") : "name_asc";
+    String sqlSort = "NAME ASC";
+    if (sortOrder == "name_desc") sqlSort = "NAME DESC";
+    else if (sortOrder == "date_desc") sqlSort = "LAST_MODIFIED DESC";
+    else if (sortOrder == "date_asc") sqlSort = "LAST_MODIFIED ASC";
 
-    char *query = sqlite3_mprintf("SELECT NAME, IS_FOLDER, SIZE, PARENT_DIR FROM FILES WHERE NAME LIKE '%%%q%%' ORDER BY IS_FOLDER DESC, NAME ASC LIMIT 100;", queryStr.c_str());
+    char *query = sqlite3_mprintf("SELECT NAME, IS_FOLDER, SIZE, PARENT_DIR, LAST_MODIFIED FROM FILES WHERE NAME LIKE '%%%q%%' ORDER BY IS_FOLDER DESC, %s LIMIT 100;", queryStr.c_str(), sqlSort.c_str());
     sqlite3_exec(db, query, build_json_callback, (void*)&context, NULL);
     sqlite3_free(query);
 

@@ -14,7 +14,7 @@ bool initDatabase() {
     if (sqlite3_open("/sdcard/index.db", &db) == SQLITE_OK) {
         //creates a new table object, and deletes already existing tables.
         sqlite3_exec(db, "DROP TABLE IF EXISTS FILES;", NULL, NULL, NULL);
-        sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS FILES (NAME TEXT, PARENT_DIR TEXT, IS_FOLDER INT, SIZE INT);", NULL, NULL, NULL);
+        sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS FILES (NAME TEXT, PARENT_DIR TEXT, IS_FOLDER INT, SIZE INT, LAST_MODIFIED INT);", NULL, NULL, NULL);
         sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS USERS (USERNAME TEXT PRIMARY KEY, PASSWORD TEXT);", NULL, NULL, NULL);
         return true;
     }
@@ -52,7 +52,8 @@ void indexInternalDrive(String targetDir) {
             //collect data and insert into database
             int isDir = file.isDirectory() ? 1 : 0;
             int size = file.size();
-            char *zSQL = sqlite3_mprintf("INSERT INTO FILES (NAME, PARENT_DIR, IS_FOLDER, SIZE) VALUES ('%q', '%q', %d, %d);", fileName.c_str(), targetDir.c_str(), isDir, size);
+            time_t lastMod = file.getLastWrite();
+            char *zSQL = sqlite3_mprintf("INSERT INTO FILES (NAME, PARENT_DIR, IS_FOLDER, SIZE, LAST_MODIFIED) VALUES ('%q', '%q', %d, %d, %lld);", fileName.c_str(), targetDir.c_str(), isDir, size, (long long)lastMod);
             sqlite3_exec(db, zSQL, NULL, NULL, NULL);
             //prevents memory leek from dynamic mem allocation resulting from query
             sqlite3_free(zSQL);
