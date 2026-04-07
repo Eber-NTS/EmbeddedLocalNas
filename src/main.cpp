@@ -42,6 +42,6 @@ void loop() {
     //actively checks for incoming http request.
     //When the function looks at a url request it matches to appropriate routes in initWebServer()
     //if user asked for /api/list, handleClient() pauses the loop and instead executes the handleAPIList() c++ function
-    //if User asls for /upload, the handleUpload() function is called
+    //if User asks for /upload, the handleUpload() function is called
     handleClient();
 }

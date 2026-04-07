@@ -8,61 +8,96 @@ File fsUploadFile;
 
 
 const char* WEB_PASSWORD = "admin";
-const char* AUTH_COOKIE = "ESP32_SESSION=authenticated";
+String currentSessionCookie = "";
 
+//verifies if incoming http request is coming from a user who had already logged in before
 bool isAuthenticated() {
+    //when browsers make a request, it sends http headers. If the user had previously logged in, the request will attach
+    //a cookie header (given from handleLogin function).
     if (server.hasHeader("Cookie")) {
         String cookie = server.header("Cookie");
-        if (cookie.indexOf(AUTH_COOKIE) != -1) {
-            return true;
+
+        //checks if currenSessionCookie exists and is not the default empty string
+        if (currentSessionCookie.length() > 0) {
+
+            int startIndex = cookie.indexOf(currentSessionCookie);
+            if (startIndex != -1) {
+                // Ensure the match is exact and not just a prefix of another value
+                int endIndex = startIndex + currentSessionCookie.length();
+                if (endIndex == cookie.length() || cookie[endIndex] == ';') {
+                    return true;
+                }
+            }
         }
     }
     return false;
 }
 
+    //Processes the form submission from a user login attempt. Determines if they are authorized and redirects them accordingly
 void handleLogin() {
+    //Checks if the browser actually sent a form field named "password". And Checks if the password they typed
+    //matches the WEB_password, which is hardcoded for right now.
     if (server.hasArg("password") && server.arg("password") == WEB_PASSWORD) {
-        server.sendHeader("Set-Cookie", String(AUTH_COOKIE) + "; Path=/; HttpOnly");
+        // Generate a random session token upon successful login
+        currentSessionCookie = "ESP32_SESSION=" + String(esp_random());
+
+        //sends data to user's web Server to save the random token as a cookie.
+        server.sendHeader("Set-Cookie", currentSessionCookie + "; Path=/; HttpOnly");
+        //redirects user after successful form submission. homepage located at '/'
         server.sendHeader("Location", "/");
         server.send(303);
     } else {
+        //redirects user back to login page. error=1 is used in login.html to reveal an error message.
         server.sendHeader("Location", "/login.html?error=1");
         server.send(303);
     }
 }
 
+//data container used to pass state between web server routing functions and the SQLite database callback function
+//this object stores the JSON packet data used for building the list of files appropriate to web directory.
 struct RenderContext {
     String currentPath;
     String generatedHTML;
 };
 
+//callback function for SQLite. Takes a row of data from the db, formats it as JSON object
+//and appends it to a long string that will be sent back to the browser
+
+//*data is a generic pointer. argc is the number of columns returned in the current row. Char **argv is an array of strings
+//containing the actual data for each column in the row
+//char **azColName is an array of strings containing the column names (Name, is_Folder)
 static int build_json_callback(void *data, int argc, char **argv, char **azColName) {
     RenderContext* ctx = (RenderContext*)data;
 
+    //add comma if string already has data
     if (ctx->generatedHTML.length() > 0) ctx->generatedHTML += ",";
 
+    //data extraction
     String name = argv[0] ? argv[0] : "Unknown";
     String isFolder = argv[1] ? argv[1] : "0";
     String size = argv[2] ? argv[2] : "0";
     String parentDir = (argc > 3 && argv[3]) ? argv[3] : "";
 
-
+    //contructs the JSON object using string concatanation
     ctx->generatedHTML += "{\"name\":\"" + name + "\",\"isFolder\":" + isFolder + ",\"size\":" + size;
     if (parentDir.length() > 0) {
         ctx->generatedHTML += ",\"parentDir\":\"" + parentDir + "\"";
     }
     ctx->generatedHTML += "}";
-
+    //signals SQLite to run this callback again for next row
     return 0;
 }
 
+//Handler for main homepage. Executes when user types esp32's IP address into their browser
 void handleRoot() {
+    //checks if user is authenticated before providing access to homepage
     if (!isAuthenticated()) {
+        //sends user to login page
         server.sendHeader("Location", "/login.html");
         server.send(303);
         return;
     }
-
+    //finds index.html and streams it to user's browser
     if (SD_MMC.exists("/index.html")) {
         File file = SD_MMC.open("/index.html", "r");
         server.streamFile(file, "text/html");
@@ -72,7 +107,11 @@ void handleRoot() {
     }
 }
 
+//primary api endpoint the web interface calls when it needs to display the contents of a folder.
+//finds which folder the user wants to view, indexes the folder into the db, and returs a formatted JSON list of the
+//contents of the folder inside.
 void handleApiList() {
+    //rejects the request if attempted by a user who is not authenticated
     if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
 
     RenderContext context;
