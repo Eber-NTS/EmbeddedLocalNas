@@ -114,17 +114,20 @@ void handleApiList() {
     //rejects the request if attempted by a user who is not authenticated
     if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
 
+    //creates an instance of RenderContext struct
     RenderContext context;
     context.generatedHTML = "";
 
+    //checks if the dir argument was provided. If it was, it sets currentPath to that folder.
     context.currentPath = server.hasArg("dir") ? server.arg("dir") : "/";
     indexInternalDrive(context.currentPath);
 
+    //char variable of instructions used to extract meta data from msd
     char *query = sqlite3_mprintf("SELECT NAME, IS_FOLDER, SIZE FROM FILES WHERE PARENT_DIR='%q' ORDER BY IS_FOLDER DESC, NAME ASC;", context.currentPath.c_str());
     sqlite3_exec(db, query, build_json_callback, (void*)&context, NULL);
     sqlite3_free(query);
 
-
+    //
     String json = "{\"dir\":\"" + context.currentPath + "\",\"files\":[" + context.generatedHTML + "]}";
     
     server.send(200, "application/json", json);
@@ -154,6 +157,12 @@ void handleDownload() {
     if (server.hasArg("file")) {
         String path = server.arg("file");
         if (!path.startsWith("/")) path = "/" + path;
+
+        // Security: Prevent downloading core system files
+        if (path == "/index.db" || path == "/index.html" || path == "/login.html") {
+            server.send(403, "text/plain", "Forbidden: Cannot download system files");
+            return;
+        }
 
         if (SD_MMC.exists(path)) {
             File downloadFile = SD_MMC.open(path, "r");
@@ -199,6 +208,12 @@ void handleDelete() {
     if (server.hasArg("file")) {
         String path = server.arg("file");
         if (!path.startsWith("/")) path = "/" + path;
+
+        //Prevent deleting core system files
+        if (path == "/index.db" || path == "/index.html" || path == "/login.html") {
+            server.send(403, "text/plain", "Forbidden: Cannot delete system files");
+            return;
+        }
 
         if (deleteFileOrFolder(path)) {
             server.send(200, "text/plain", "Deleted successfully");
