@@ -158,8 +158,11 @@ void handleDownload() {
         String path = server.arg("file");
         if (!path.startsWith("/")) path = "/" + path;
 
+        String lowerPath = path;
+        lowerPath.toLowerCase();
+
         // Security: Prevent downloading core system files
-        if (path == "/index.db" || path == "/index.html" || path == "/login.html") {
+        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html") {
             server.send(403, "text/plain", "Forbidden: Cannot download system files");
             return;
         }
@@ -209,8 +212,11 @@ void handleDelete() {
         String path = server.arg("file");
         if (!path.startsWith("/")) path = "/" + path;
 
-        //Prevent deleting core system files
-        if (path == "/index.db" || path == "/index.html" || path == "/login.html") {
+        String lowerPath = path;
+        lowerPath.toLowerCase();
+
+        // Security: Prevent deleting core system files
+        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html") {
             server.send(403, "text/plain", "Forbidden: Cannot delete system files");
             return;
         }

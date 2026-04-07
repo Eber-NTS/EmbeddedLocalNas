@@ -42,8 +42,12 @@ void indexInternalDrive(String targetDir) {
         String fileName = file.name();
         //if file name starts with /, we remove it to have a clean name
         if (fileName.startsWith("/")) fileName = fileName.substring(1);
-        //conditions makes sure system files are hidden from the browser
-        if (fileName != "index.db" && fileName != "index.html" && fileName != "login.html") {
+        
+        String lowerName = fileName;
+        lowerName.toLowerCase();
+        
+        //conditions makes sure system files are hidden from the browser (case-insensitive)
+        if (lowerName != "index.db" && lowerName != "index.db-journal" && lowerName != "index.html" && lowerName != "login.html") {
             //collect data and insert into database
             int isDir = file.isDirectory() ? 1 : 0;
             int size = file.size();
