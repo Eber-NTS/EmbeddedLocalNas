@@ -15,6 +15,7 @@ bool initDatabase() {
         //creates a new table object, and deletes already existing tables.
         sqlite3_exec(db, "DROP TABLE IF EXISTS FILES;", NULL, NULL, NULL);
         sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS FILES (NAME TEXT, PARENT_DIR TEXT, IS_FOLDER INT, SIZE INT);", NULL, NULL, NULL);
+        sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS USERS (USERNAME TEXT PRIMARY KEY, PASSWORD TEXT);", NULL, NULL, NULL);
         return true;
     }
     return false;
@@ -61,4 +62,38 @@ void indexInternalDrive(String targetDir) {
     }
     //closes batch mode
     sqlite3_exec(db, "COMMIT;",NULL, NULL, NULL);
+}
+
+//Takes a userName and password sent from user to create an account to be used for login. The data is inserted into the User's table
+bool createUser(String username, String password) {
+    sqlite3_stmt *stmt;
+    const char *sql = "INSERT INTO USERS (USERNAME, PASSWORD) VALUES (?, ?);";
+    
+    // Prepare the statement safely
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, password.c_str(), -1, SQLITE_TRANSIENT);
+        
+        int rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        return rc == SQLITE_DONE; // Returns true if insertion succeeded
+    }
+    return false;
+}
+
+bool verifyUser(String username, String password) {
+    sqlite3_stmt *stmt;
+    bool isValid = false;
+    const char *sql = "SELECT PASSWORD FROM USERS WHERE USERNAME = ?;";
+    
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+        
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            String dbPass = (const char*)sqlite3_column_text(stmt, 0);
+            if (dbPass == password) isValid = true;
+        }
+        sqlite3_finalize(stmt);
+    }
+    return isValid;
 }
