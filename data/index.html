@@ -11,6 +11,11 @@
         .file-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #333; }
         .action-link { text-decoration: none; margin-right: 15px; cursor: pointer; }
         .back-btn { font-size: 20px; color: #fff; text-decoration: none; cursor: pointer; }
+        
+        #drop-zone { background-color: #2d2d2d; border: 2px dashed #4daafc; border-radius: 8px; padding: 30px; text-align: center; transition: all 0.3s ease; margin-bottom: 20px; }
+        #drop-zone.dragover { background-color: #3d3d3d; border-color: #fce84d; }
+        .upload-btn { background-color: #4daafc; padding: 8px 16px; border:none; border-radius:4px; font-weight:bold; cursor: pointer; color: #000; }
+        .upload-btn:hover { background-color: #3b9aec; }
     </style>
 </head>
 <body>
@@ -35,13 +40,14 @@
 
     </div>
 
-
-    <div style="background-color: #2d2d2d; border-radius: 8px; padding: 15px; text-align: center;">
-        <h3>Upload File</h3>
-        <form id="upload-form">
-            <input type="file" id="upload-input" required style="color:white;">
-            <button type="submit" style="background-color: #4daafc; padding: 8px 16px; border:none; border-radius:4px; font-weight:bold;">Upload</button>
-        </form>
+    <div id="drop-zone">
+        <div style="font-size: 40px; margin-bottom: 10px;">☁️</div>
+        <h3 style="margin-top: 0;">Drag & Drop Files Here</h3>
+        <p style="color: #aaa;">or</p>
+        
+        <input type="file" id="upload-input" style="display:none;">
+        <button class="upload-btn" onclick="document.getElementById('upload-input').click()">Browse Files</button>
+        <div id="upload-status" style="margin-top: 15px; font-weight: bold; color: #4dfc67;"></div>
     </div>
 </div>
 
@@ -264,18 +270,47 @@
         }
     });
 
+    // --- Drag and Drop File Upload Logic ---
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('upload-input');
+    const uploadStatus = document.getElementById('upload-status');
 
-    document.getElementById('upload-form').addEventListener('submit', async (e) => {
+    // Prevent default browser behavior (which would open the file instead of dropping it)
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, preventDefaults, false);
+    });
+
+    function preventDefaults(e) {
         e.preventDefault();
-        const fileInput = document.getElementById('upload-input');
-        if(fileInput.files.length === 0) return;
+        e.stopPropagation();
+    }
 
+    // Add and remove visual highlight when dragging over the box
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+    });
+
+    // Handle dropped files
+    dropZone.addEventListener('drop', (e) => {
+        if (e.dataTransfer.files.length > 0) handleUploadFile(e.dataTransfer.files[0]);
+    }, false);
+
+    // Handle traditional browse button selection
+    fileInput.addEventListener('change', function() {
+        if (this.files.length > 0) handleUploadFile(this.files[0]);
+    });
+
+    // Unified upload function that talks to the ESP32
+    async function handleUploadFile(file) {
         const formData = new FormData();
-        formData.append('upload_file', fileInput.files[0]);
+        formData.append('upload_file', file);
 
-        const submitBtn = e.target.querySelector('button');
-        submitBtn.disabled = true;
-        submitBtn.innerText = "Uploading...";
+        uploadStatus.style.color = "#4daafc";
+        uploadStatus.innerText = "Uploading " + file.name + "...";
 
         try {
             const response = await fetch(`/upload?dir=${currentDirectory}`, {
@@ -287,16 +322,19 @@
                 window.location.href = "/login.html";
                 return;
             }
+            
+            uploadStatus.style.color = "#4dfc67";
+            uploadStatus.innerText = "Upload complete!";
+            setTimeout(() => { uploadStatus.innerText = ""; }, 3000);
+            
             fileInput.value = "";
             lastDataJson = ""; // Force re-render
             await loadDirectory(currentDirectory, false);
         } catch (err) {
-            alert("Upload failed");
-        } finally {
-            submitBtn.disabled = false;
-            submitBtn.innerText = "Upload";
+            uploadStatus.style.color = "#ff4d4d";
+            uploadStatus.innerText = "Upload failed.";
         }
-    });
+    }
 
 
     const urlParams = new URLSearchParams(window.location.search);

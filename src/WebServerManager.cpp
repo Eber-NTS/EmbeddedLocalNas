@@ -238,12 +238,19 @@ void handleDelete() {
     server.send(500, "text/plain", "Failed to delete");
 }
 
-void handleUpload() {
-    if (!isAuthenticated()) return;
+// Tracks if the currently uploading file passed the auth check
+static bool isUploadAuthorized = false;
 
+void handleUpload() {
     HTTPUpload& upload = server.upload();
 
     if (upload.status == UPLOAD_FILE_START) {
+        if (!isAuthenticated()) {
+            isUploadAuthorized = false;
+            return;
+        }
+        isUploadAuthorized = true;
+
         String dir = server.hasArg("dir") ? server.arg("dir") : "/";
         if (!dir.endsWith("/")) dir += "/";
         String filename = upload.filename;
@@ -254,10 +261,12 @@ void handleUpload() {
         fsUploadFile = SD_MMC.open(path, FILE_WRITE);
 
     } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (!isUploadAuthorized) return;
         if (fsUploadFile) {
             fsUploadFile.write(upload.buf, upload.currentSize);
         }
     } else if (upload.status == UPLOAD_FILE_END) {
+        if (!isUploadAuthorized) return;
         if (fsUploadFile) {
             fsUploadFile.close();
             Serial.printf("Upload Complete: %s, Size: %u bytes\n", upload.filename.c_str(), upload.totalSize);
