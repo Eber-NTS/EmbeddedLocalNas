@@ -21,9 +21,8 @@ void setup() {
     WiFi.setTxPower(WIFI_POWER_11dBm);
     WiFi.softAP(ssid, password); //defiens access point name and password
 
-    //Mounts the card, if it fails it returns a failed message.
+    //Mounts both internal flash and SD card, prints error and halts if either fails
     if (!initStorage()) {
-        Serial.println("SD Card Mount Failed!");
         return; 
     }
 

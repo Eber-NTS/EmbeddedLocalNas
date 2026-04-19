@@ -47,8 +47,8 @@ void indexInternalDrive(String targetDir) {
         String lowerName = fileName;
         lowerName.toLowerCase();
         
-        //conditions makes sure system files are hidden from the browser (case-insensitive)
-        if (lowerName != "index.db" && lowerName != "index.db-journal" && lowerName != "index.html" && lowerName != "login.html") {
+        //conditions makes sure database files are hidden from the browser (case-insensitive)
+        if (lowerName != "index.db" && lowerName != "index.db-journal") {
             //collect data and insert into database
             int isDir = file.isDirectory() ? 1 : 0;
             int size = file.size();

@@ -2,6 +2,7 @@
 #include "StorageManager.h"
 #include "DatabaseManager.h"
 #include "SD_MMC.h"
+#include <LittleFS.h>
 #include <vector>
 
 WebServer server(80);
@@ -105,12 +106,12 @@ void handleRoot() {
         server.send(303);
         return;
     }
-    if (SD_MMC.exists("/index.html")) {
-        File file = SD_MMC.open("/index.html", "r");
+    if (LittleFS.exists("/index.html")) {
+        File file = LittleFS.open("/index.html", "r");
         server.streamFile(file, "text/html");
         file.close();
     } else {
-        server.send(404, "text/plain", "Missing index.html on drive. Please upload it.");
+        server.send(404, "text/plain", "Missing index.html in flash. Please upload LittleFS image.");
     }
 }
 
@@ -170,7 +171,7 @@ void handleDownload() {
         String lowerPath = path;
         lowerPath.toLowerCase();
 
-        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html") {
+        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal") {
             server.send(403, "text/plain", "Forbidden: Cannot download system files");
             return;
         }
@@ -204,8 +205,8 @@ void handleStaticWebFiles() {
         return;
     }
 
-    if (SD_MMC.exists(path)) {
-        File file = SD_MMC.open(path, "r");
+    if (LittleFS.exists(path)) {
+        File file = LittleFS.open(path, "r");
         server.streamFile(file, getContentType(path));
         file.close();
         return;
@@ -223,7 +224,7 @@ void handleDelete() {
         String lowerPath = path;
         lowerPath.toLowerCase();
 
-        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html") {
+        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal") {
             server.send(403, "text/plain", "Forbidden: Cannot delete system files");
             return;
         }

@@ -183,4 +183,5 @@
  C:/Users/ebers/.platformio/packages/framework-arduinoespressif32/libraries/SD_MMC/src/SD_MMC.h \
  C:/Users/ebers/.platformio/packages/framework-arduinoespressif32/libraries/FS/src/FS.h \
  C:/Users/ebers/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/driver/include/driver/sdmmc_types.h \
- C:/Users/ebers/.platformio/packages/framework-arduinoespressif32/libraries/SD_MMC/src/sd_defines.h
+ C:/Users/ebers/.platformio/packages/framework-arduinoespressif32/libraries/SD_MMC/src/sd_defines.h \
+ C:/Users/ebers/.platformio/packages/framework-arduinoespressif32/libraries/LittleFS/src/LittleFS.h

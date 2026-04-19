@@ -1,15 +1,27 @@
 #include "StorageManager.h"
+#include <LittleFS.h>
 
-//mounts appropriate pins for microSSD component
+
+
+//mounts internal flash and appropriate pins for microSSD component
 bool initStorage() {
+    bool success = true;
+
+    // Mount the internal flash memory for system files
+    if (!LittleFS.begin(true)) {
+        Serial.println("LittleFS Mount Failed!");
+        success = false;
+    }
+
     //uses dedicated physical pins for msd card
     SD_MMC.setPins(39, 38, 40);
     //   "/sdcard" becomes the root path and
     //Maps the physical root to the /sdcard directory in the virtual file system.
     if (!SD_MMC.begin("/sdcard", true)) {
-        return false;
+        Serial.println("SD Card Mount Failed!");
+        success = false;
     }
-    return true;
+    return success;
 }
 
 //takes a directory/folder sent from user in URL format to delete the contents inside it

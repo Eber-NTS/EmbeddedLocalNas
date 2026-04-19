@@ -211,4 +211,5 @@
  C:/Users/ebers/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/driver/include/driver/sdmmc_types.h \
  C:/Users/ebers/.platformio/packages/framework-arduinoespressif32/libraries/SD_MMC/src/sd_defines.h \
  src/DatabaseManager.h \
- .pio/libdeps/esp32-s3-devkitc-1/Sqlite3Esp32/src/sqlite3.h
+ .pio/libdeps/esp32-s3-devkitc-1/Sqlite3Esp32/src/sqlite3.h \
+ C:/Users/ebers/.platformio/packages/framework-arduinoespressif32/libraries/LittleFS/src/LittleFS.h
