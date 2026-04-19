@@ -8,25 +8,39 @@
 WebServer server(80);
 File fsUploadFile;
 
-// Store multiple active session cookies
-std::vector<String> activeSessions;
+// Structure to hold authenticated user identities
+struct Session {
+    String token;
+    String username;
+    int role;
+};
 
-//verifies if incoming http request is coming from a user who had already logged in before
-bool isAuthenticated() {
+// Store multiple active sessions
+std::vector<Session> activeSessions;
+
+// Internal function to get the current user's session context
+Session* getCurrentSession() {
     if (server.hasHeader("Cookie")) {
         String cookie = server.header("Cookie");
 
-        for (const String& session : activeSessions) {
-            int startIndex = cookie.indexOf(session);
+        for (auto& session : activeSessions) {
+            int startIndex = cookie.indexOf(session.token);
             if (startIndex != -1) {
-                // Ensure the match is exact and not just a prefix of another value
-                int endIndex = startIndex + session.length();
+                int endIndex = startIndex + session.token.length();
                 if (endIndex == cookie.length() || cookie[endIndex] == ';') {
-                    return true;
+                    return &session;
                 }
             }
         }
     }
+    return nullptr;
+}
+
+// Quick helper to check if logged in at all (used by standard routes)
+bool isAuthenticated() {
+    return getCurrentSession() != nullptr;
+}
+
     return false;
 }
 
@@ -36,10 +50,11 @@ void handleLogin() {
         String username = server.arg("username");
         String password = server.arg("password");
 
-        if (verifyUser(username, password)) {
+        int role = verifyUser(username, password);
+        if (role != -1) { // -1 means failed login
             // Generate a random session token upon successful login
             String newSession = "ESP32_SESSION=" + String(esp_random());
-            activeSessions.push_back(newSession);
+            activeSessions.push_back({newSession, username, role});
 
             server.sendHeader("Set-Cookie", newSession + "; Path=/; HttpOnly");
             server.sendHeader("Location", "/");

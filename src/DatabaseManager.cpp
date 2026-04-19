@@ -15,7 +15,7 @@ bool initDatabase() {
         //creates a new table object, and deletes already existing tables.
         sqlite3_exec(db, "DROP TABLE IF EXISTS FILES;", NULL, NULL, NULL);
         sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS FILES (NAME TEXT, PARENT_DIR TEXT, IS_FOLDER INT, SIZE INT, LAST_MODIFIED INT);", NULL, NULL, NULL);
-        sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS USERS (USERNAME TEXT PRIMARY KEY, PASSWORD TEXT);", NULL, NULL, NULL);
+        sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS USERS (USERNAME TEXT PRIMARY KEY, PASSWORD TEXT, ROLE INT DEFAULT 0);", NULL, NULL, NULL);
         return true;
     }
     return false;
@@ -68,12 +68,14 @@ void indexInternalDrive(String targetDir) {
 //Takes a userName and password sent from user to create an account to be used for login. The data is inserted into the User's table
 bool createUser(String username, String password) {
     sqlite3_stmt *stmt;
-    const char *sql = "INSERT INTO USERS (USERNAME, PASSWORD) VALUES (?, ?);";
+    const char *sql = "INSERT INTO USERS (USERNAME, PASSWORD, ROLE) VALUES (?, ?, ?);";
     
+    int defaultRole = 0; // 0 = User, 1 = Admin. (You could make the first ever user an admin automatically if you wanted)
     // Prepare the statement safely
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(stmt, 2, password.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 3, defaultRole);
         
         int rc = sqlite3_step(stmt);
         sqlite3_finalize(stmt);
@@ -82,19 +84,20 @@ bool createUser(String username, String password) {
     return false;
 }
 
-bool verifyUser(String username, String password) {
+// Modified to return the user's role if valid, or -1 if invalid
+int verifyUser(String username, String password) {
     sqlite3_stmt *stmt;
-    bool isValid = false;
-    const char *sql = "SELECT PASSWORD FROM USERS WHERE USERNAME = ?;";
+    int userRole = -1; // -1 means authentication failed
+    const char *sql = "SELECT PASSWORD, ROLE FROM USERS WHERE USERNAME = ?;";
     
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
         
         if (sqlite3_step(stmt) == SQLITE_ROW) {
             String dbPass = (const char*)sqlite3_column_text(stmt, 0);
-            if (dbPass == password) isValid = true;
+            if (dbPass == password) userRole = sqlite3_column_int(stmt, 1);
         }
         sqlite3_finalize(stmt);
     }
-    return isValid;
+    return userRole;
 }
