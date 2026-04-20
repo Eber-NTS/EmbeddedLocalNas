@@ -21,10 +21,9 @@ void setup() {
     WiFi.setTxPower(WIFI_POWER_11dBm);
     WiFi.softAP(ssid, password); //defiens access point name and password
 
-    //Mounts the card, if it fails it returns a failed message.
+    //Mounts the internal flash and SD card.
     if (!initStorage()) {
-        Serial.println("SD Card Mount Failed!");
-        return; 
+        Serial.println("Storage Initialization failed partially or completely.");
     }
 
     // Creates and Checks if instance of Database object from SQLite library exists
