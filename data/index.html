@@ -18,6 +18,7 @@
             text-align: center;
             border: 2px dashed #444;
             transition: all 0.3s ease;
+            margin-bottom: 20px;
         }
         .drop-zone.dragover {
             background-color: #3d3d3d;
@@ -44,11 +45,6 @@
         </div>
     </div>
 
-    <div class="file-box" id="file-list">
-
-    </div>
-
-
     <div class="drop-zone" id="drop-zone">
         <h3>Upload File</h3>
         <p style="color: #aaa; margin-bottom: 15px;">Drag & Drop files here, or choose a file below</p>
@@ -57,6 +53,11 @@
             <button type="submit" id="upload-btn" style="background-color: #4daafc; padding: 8px 16px; border:none; border-radius:4px; font-weight:bold; cursor: pointer;">Upload</button>
         </form>
     </div>
+
+    <div class="file-box" id="file-list">
+
+    </div>
+
 </div>
 
 <script>
