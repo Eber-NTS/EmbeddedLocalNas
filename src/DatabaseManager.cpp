@@ -51,8 +51,11 @@ void indexInternalDrive(String targetDir) {
     //tells sqlite to pause writing every single change directly to the physical micro sd.
     //Opens a batch style input mode, that queues all consecutive db commands into esp32's ram.
     sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, NULL);
-    //deletes all files from the files table
-    sqlite3_exec(db, "DELETE FROM FILES;", NULL, NULL, NULL);
+    
+    // Deletes only the records for the specific directory being re-indexed.
+    char* deleteQuery = sqlite3_mprintf("DELETE FROM FILES WHERE PARENT_DIR = '%q';", targetDir.c_str());
+    sqlite3_exec(db, deleteQuery, NULL, NULL, NULL);
+    sqlite3_free(deleteQuery);
 
     //check if file at targetDir exists and is a directory
     File root = SD_MMC.open(targetDir);
