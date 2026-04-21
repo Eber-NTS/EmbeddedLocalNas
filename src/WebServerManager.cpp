@@ -209,7 +209,7 @@ void handleDownload() {
         String lowerPath = path;
         lowerPath.toLowerCase();
 
-        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html") {
+        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html" || lowerPath.indexOf("system volume information") != -1) {
             server.send(403, "text/plain", "Forbidden: Cannot download system files");
             return;
         }
@@ -246,6 +246,13 @@ void handleStaticWebFiles() {
         return;
     }
 
+    String lowerPath = path;
+    lowerPath.toLowerCase();
+    if (lowerPath.indexOf("system volume information") != -1) {
+        server.send(403, "text/plain", "Forbidden: Cannot access system files");
+        return;
+    }
+
     if (SD_MMC.exists(path)) {
         File file = SD_MMC.open(path, "r");
         server.streamFile(file, getContentType(path));
@@ -265,7 +272,7 @@ void handleDelete() {
         String lowerPath = path;
         lowerPath.toLowerCase();
 
-        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html") {
+        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html" || lowerPath.indexOf("system volume information") != -1) {
             server.send(403, "text/plain", "Forbidden: Cannot delete system files");
             return;
         }
@@ -290,6 +297,13 @@ void handleUpload() {
         String filename = upload.filename;
         if (filename.startsWith("/")) filename = filename.substring(1);
         String path = dir + filename;
+
+        String lowerPath = path;
+        lowerPath.toLowerCase();
+        if (lowerPath.indexOf("system volume information") != -1) {
+            server.send(403, "text/plain", "Forbidden: Cannot upload to system folders");
+            return;
+        }
 
         Serial.printf("Receiving File: %s\n", path.c_str());
         fsUploadFile = SD_MMC.open(path, FILE_WRITE);
