@@ -30,7 +30,7 @@ bool initDatabase() {
         // Self-Healing Check: Verify the USERS table actually has the ROLE column.
         // If ALTER TABLE failed (common on embedded SQLite), queries will permanently fail.
         sqlite3_stmt *stmt;
-        if (sqlite3_prepare_v2(db, "SELECT ROLE FROM USERS LIMIT 1;", -1, &stmt, NULL) != SQLITE_OK) {
+        if (sqlite3_prepare_v2(db, "SELECT ROLE, CREATED_AT FROM USERS LIMIT 1;", -1, &stmt, NULL) != SQLITE_OK) {
             Serial.println("Schema mismatch detected! Rebuilding USERS table...");
             sqlite3_exec(db, "DROP TABLE IF EXISTS USERS;", NULL, NULL, NULL);
             sqlite3_exec(db, "CREATE TABLE USERS (USERNAME TEXT PRIMARY KEY, PASSWORD TEXT, ROLE INT DEFAULT 0, CREATED_AT INT DEFAULT 0);", NULL, NULL, NULL);
@@ -77,7 +77,7 @@ void indexInternalDrive(String targetDir) {
         lowerName.toLowerCase();
         
         //conditions makes sure system files are hidden from the browser (case-insensitive)
-        if (lowerName != "index.db" && lowerName != "index.db-journal" && lowerName != "index.html" && lowerName != "login.html" && lowerName != "system volume information") {
+        if (lowerName != "index.db" && lowerName != "index.db-journal" && lowerName != "index.html" && lowerName != "login.html" && lowerName != "admin.html" && lowerName != "system volume information") {
             //collect data and insert into database
             int isDir = file.isDirectory() ? 1 : 0;
             int size = file.size();

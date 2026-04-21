@@ -210,7 +210,7 @@ void handleDownload() {
         String lowerPath = path;
         lowerPath.toLowerCase();
 
-        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html" || lowerPath.indexOf("system volume information") != -1) {
+        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html" || lowerPath == "/admin.html" || lowerPath.indexOf("system volume information") != -1) {
             server.send(403, "text/plain", "Forbidden: Cannot download system files");
             return;
         }
@@ -249,6 +249,13 @@ void handleStaticWebFiles() {
 
     String lowerPath = path;
     lowerPath.toLowerCase();
+
+    if (lowerPath == "/admin.html" && !requireAdmin()) {
+        server.sendHeader("Location", "/");
+        server.send(303);
+        return;
+    }
+
     if (lowerPath.indexOf("system volume information") != -1) {
         server.send(403, "text/plain", "Forbidden: Cannot access system files");
         return;
@@ -273,7 +280,7 @@ void handleDelete() {
         String lowerPath = path;
         lowerPath.toLowerCase();
 
-        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html" || lowerPath.indexOf("system volume information") != -1) {
+        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html" || lowerPath == "/admin.html" || lowerPath.indexOf("system volume information") != -1) {
             server.send(403, "text/plain", "Forbidden: Cannot delete system files");
             return;
         }
