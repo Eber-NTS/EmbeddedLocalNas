@@ -96,6 +96,24 @@
             loadDirectory(currentDirectory, false);
         }
     }
+    
+    // Sync the browser's time to the ESP32 (since the offline NAS has no internet access)
+    async function syncTime() {
+        if (!sessionStorage.getItem('timeSynced')) {
+            const timestamp = Math.floor(Date.now() / 1000);
+            try {
+                const response = await fetch('/api/time', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'time=' + timestamp
+                });
+                if (response.ok) {
+                    sessionStorage.setItem('timeSynced', 'true');
+                }
+            } catch (e) { console.error("Time sync failed", e); }
+        }
+    }
+    syncTime();
 
 
 

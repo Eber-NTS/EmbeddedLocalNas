@@ -3,6 +3,7 @@
 #include "DatabaseManager.h"
 #include "SD_MMC.h"
 #include <vector>
+#include <sys/time.h>
 
 WebServer server(80);
 File fsUploadFile;
@@ -320,6 +321,22 @@ void handleUpload() {
     }
 }
 
+// Receives the current time from the user's browser and updates the ESP32 system clock
+void handleTimeSync() {
+    if (server.hasArg("time")) {
+        long timestamp = server.arg("time").toInt();
+        if (timestamp > 0) {
+            struct timeval tv;
+            tv.tv_sec = timestamp;
+            tv.tv_usec = 0;
+            settimeofday(&tv, NULL);
+            server.send(200, "text/plain", "Time synced successfully");
+            return;
+        }
+    }
+    server.send(400, "text/plain", "Invalid time data");
+}
+
 // Admin specific endpoints
 
 void handleApiMe() {
@@ -442,6 +459,9 @@ void initWebServer() {
     server.on("/api/search", HTTP_GET, handleApiSearch);
     server.on("/download", HTTP_GET, handleDownload);
     server.on("/delete", HTTP_GET, handleDelete);
+
+    // Open endpoint so the browser can sync time before logging in
+    server.on("/api/time", HTTP_POST, handleTimeSync);
 
     server.on("/upload", HTTP_POST, []() {
         if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
