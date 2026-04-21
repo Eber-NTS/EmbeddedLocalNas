@@ -11,6 +11,18 @@
         .file-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #333; }
         .action-link { text-decoration: none; margin-right: 15px; cursor: pointer; }
         .back-btn { font-size: 20px; color: #fff; text-decoration: none; cursor: pointer; }
+        .drop-zone {
+            background-color: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            border: 2px dashed #444;
+            transition: all 0.3s ease;
+        }
+        .drop-zone.dragover {
+            background-color: #3d3d3d;
+            border-color: #4daafc;
+        }
     </style>
 </head>
 <body>
@@ -27,6 +39,7 @@
             </select>
             <input type="text" id="search-input" placeholder="Search files..." style="padding: 8px; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: white;">
             <button onclick="performSearch()" style="background-color: #4daafc; padding: 8px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Search</button>
+            <button id="admin-panel-btn" onclick="window.location.href='/admin.html'" style="display: none; background-color: #fce84d; color: black; padding: 8px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; margin-left: 10px;">Admin Panel</button>
             <button onclick="logout()" style="background-color: #ff4d4d; padding: 8px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; margin-left: 10px;">Logout</button>
         </div>
     </div>
@@ -36,11 +49,12 @@
     </div>
 
 
-    <div style="background-color: #2d2d2d; border-radius: 8px; padding: 15px; text-align: center;">
+    <div class="drop-zone" id="drop-zone">
         <h3>Upload File</h3>
+        <p style="color: #aaa; margin-bottom: 15px;">Drag & Drop files here, or choose a file below</p>
         <form id="upload-form">
             <input type="file" id="upload-input" required style="color:white;">
-            <button type="submit" style="background-color: #4daafc; padding: 8px 16px; border:none; border-radius:4px; font-weight:bold;">Upload</button>
+            <button type="submit" id="upload-btn" style="background-color: #4daafc; padding: 8px 16px; border:none; border-radius:4px; font-weight:bold; cursor: pointer;">Upload</button>
         </form>
     </div>
 </div>
@@ -52,6 +66,25 @@
     let isSearching = false; //Keeps track if the user is currently looking at search results rather than a standard folder
     let currentSearchQuery = ""; //keeps track of what query was requested
     let currentSort = "name_asc"; // Default sort order
+
+    async function checkUserRole() {
+        try {
+            const response = await fetch('/api/me');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.role === 1) {
+                    document.getElementById('admin-panel-btn').style.display = 'inline-block';
+                }
+            } else if (response.status === 401) {
+                window.location.href = "/login.html";
+            }
+        } catch (err) {
+            console.error("Failed to fetch user info", err);
+        }
+    }
+
+    // Call checkUserRole on page load
+    checkUserRole();
 
     function onSortChange() {
         currentSort = document.getElementById('sort-select').value;
@@ -265,15 +298,11 @@
     });
 
 
-    document.getElementById('upload-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const fileInput = document.getElementById('upload-input');
-        if(fileInput.files.length === 0) return;
-
+    async function uploadFile(file) {
         const formData = new FormData();
-        formData.append('upload_file', fileInput.files[0]);
+        formData.append('upload_file', file);
 
-        const submitBtn = e.target.querySelector('button');
+        const submitBtn = document.getElementById('upload-btn');
         submitBtn.disabled = true;
         submitBtn.innerText = "Uploading...";
 
@@ -287,7 +316,7 @@
                 window.location.href = "/login.html";
                 return;
             }
-            fileInput.value = "";
+            document.getElementById('upload-input').value = "";
             lastDataJson = ""; // Force re-render
             await loadDirectory(currentDirectory, false);
         } catch (err) {
@@ -296,6 +325,46 @@
             submitBtn.disabled = false;
             submitBtn.innerText = "Upload";
         }
+    }
+
+    document.getElementById('upload-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fileInput = document.getElementById('upload-input');
+        if(fileInput.files.length === 0) return;
+        await uploadFile(fileInput.files[0]);
+    });
+
+    // Drag and drop event listeners
+    const dropZone = document.getElementById('drop-zone');
+
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, preventDefaults, false);
+    });
+
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+    });
+
+    dropZone.addEventListener('drop', async (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+
+        if (files.length === 0) return;
+
+        // Update input element for visual feedback
+        const fileInput = document.getElementById('upload-input');
+        fileInput.files = files;
+
+        await uploadFile(files[0]);
     });
 
 

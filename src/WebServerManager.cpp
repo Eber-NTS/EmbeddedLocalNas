@@ -7,26 +7,44 @@
 WebServer server(80);
 File fsUploadFile;
 
-// Store multiple active session cookies
-std::vector<String> activeSessions;
+// Struct to hold session data
+struct Session {
+    String token;
+    String username;
+    int role;
+};
 
-//verifies if incoming http request is coming from a user who had already logged in before
-bool isAuthenticated() {
+// Store multiple active session objects
+std::vector<Session> activeSessions;
+
+// Helper to get the current session based on the incoming cookie
+Session* getCurrentSession() {
     if (server.hasHeader("Cookie")) {
         String cookie = server.header("Cookie");
 
-        for (const String& session : activeSessions) {
-            int startIndex = cookie.indexOf(session);
+        for (auto& session : activeSessions) {
+            int startIndex = cookie.indexOf(session.token);
             if (startIndex != -1) {
                 // Ensure the match is exact and not just a prefix of another value
-                int endIndex = startIndex + session.length();
+                int endIndex = startIndex + session.token.length();
                 if (endIndex == cookie.length() || cookie[endIndex] == ';') {
-                    return true;
+                    return &session;
                 }
             }
         }
     }
-    return false;
+    return nullptr;
+}
+
+// verifies if incoming http request is coming from a user who had already logged in before
+bool isAuthenticated() {
+    return getCurrentSession() != nullptr;
+}
+
+// checks if current session is an admin
+bool requireAdmin() {
+    Session* sess = getCurrentSession();
+    return sess != nullptr && sess->role == 1;
 }
 
 //Processes the form submission from a user login attempt.
@@ -35,12 +53,17 @@ void handleLogin() {
         String username = server.arg("username");
         String password = server.arg("password");
 
-        if (verifyUser(username, password)) {
-            // Generate a random session token upon successful login
-            String newSession = "ESP32_SESSION=" + String(esp_random());
-            activeSessions.push_back(newSession);
+        // Trim whitespace to match the formatting enforced during registration
+        username.trim();
+        password.trim();
 
-            server.sendHeader("Set-Cookie", newSession + "; Path=/; HttpOnly");
+        int role = verifyUser(username, password);
+        if (role != -1) {
+            // Generate a random session token upon successful login
+            String token = "ESP32_SESSION=" + String(esp_random());
+            activeSessions.push_back({token, username, role});
+
+            server.sendHeader("Set-Cookie", token + "; Path=/; HttpOnly");
             server.sendHeader("Location", "/");
             server.send(303);
             return;
@@ -57,8 +80,19 @@ void handleRegister() {
         String username = server.arg("username");
         String password = server.arg("password");
 
+        username.trim();
+        password.trim();
+
+        // Prevent creating users with empty credentials
+        if (username.length() == 0 || password.length() == 0) {
+            server.sendHeader("Location", "/login.html?error=3");
+            server.send(303);
+            return;
+        }
+
         // Attempt to create user (will fail if username exists due to PRIMARY KEY)
-        if (createUser(username, password)) {
+        // Default role is 0 (standard user)
+        if (createUser(username, password, 0)) {
             // Success, send back to login with success message
             server.sendHeader("Location", "/login.html?success=1");
             server.send(303);
@@ -198,7 +232,10 @@ String getContentType(String filename) {
 
 void handleStaticWebFiles() {
     String path = server.uri();
-    if (path != "/login.html" && !isAuthenticated()) {
+    
+    // Allow the login page and background assets (like favicon) to bypass the auth redirect
+    bool isPublicAsset = (path == "/login.html" || path.endsWith(".ico"));
+    if (!isPublicAsset && !isAuthenticated()) {
         server.sendHeader("Location", "/login.html");
         server.send(303);
         return;
@@ -264,6 +301,114 @@ void handleUpload() {
     }
 }
 
+// Admin specific endpoints
+
+void handleApiMe() {
+    Session* sess = getCurrentSession();
+    if (sess) {
+        String json = "{\"username\":\"" + sess->username + "\",\"role\":" + String(sess->role) + "}";
+        server.send(200, "application/json", json);
+    } else {
+        server.send(401, "application/json", "{\"error\":\"Unauthorized\"}");
+    }
+}
+
+static int build_users_json_callback(void *data, int argc, char **argv, char **azColName) {
+    String* json = (String*)data;
+    if (json->length() > 0) *json += ",";
+
+    String username = argv[0] ? argv[0] : "Unknown";
+    String role = argv[1] ? argv[1] : "0";
+
+    *json += "{\"username\":\"" + username + "\",\"role\":" + role + "}";
+    return 0;
+}
+
+void handleAdminUsersGet() {
+    if (!requireAdmin()) { server.send(403, "text/plain", "Forbidden"); return; }
+
+    String jsonResult = "";
+    const char* sql = "SELECT USERNAME, ROLE FROM USERS;";
+    sqlite3_exec(db, sql, build_users_json_callback, (void*)&jsonResult, NULL);
+
+    server.send(200, "application/json", "[" + jsonResult + "]");
+}
+
+void handleAdminRolesPost() {
+    if (!requireAdmin()) { server.send(403, "text/plain", "Forbidden"); return; }
+
+    if (server.hasArg("username") && server.hasArg("role")) {
+        String username = server.arg("username");
+        int newRole = server.arg("role").toInt();
+
+        sqlite3_stmt *stmt;
+        const char *sql = "UPDATE USERS SET ROLE = ? WHERE USERNAME = ?;";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, newRole);
+            sqlite3_bind_text(stmt, 2, username.c_str(), -1, SQLITE_TRANSIENT);
+
+            if (sqlite3_step(stmt) == SQLITE_DONE) {
+                // Remove existing sessions for this user so they have to login again
+                for (auto it = activeSessions.begin(); it != activeSessions.end(); ) {
+                    if (it->username == username) {
+                        it = activeSessions.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+                server.send(200, "text/plain", "Role updated successfully");
+            } else {
+                server.send(500, "text/plain", "Failed to update role");
+            }
+            sqlite3_finalize(stmt);
+        } else {
+             server.send(500, "text/plain", "Database error");
+        }
+    } else {
+        server.send(400, "text/plain", "Missing arguments");
+    }
+}
+
+void handleAdminUsersDelete() {
+    if (!requireAdmin()) { server.send(403, "text/plain", "Forbidden"); return; }
+
+    if (server.hasArg("username")) {
+        String username = server.arg("username");
+
+        // Prevent deleting oneself
+        Session* sess = getCurrentSession();
+        if (sess && sess->username == username) {
+            server.send(400, "text/plain", "Cannot delete yourself");
+            return;
+        }
+
+        sqlite3_stmt *stmt;
+        const char *sql = "DELETE FROM USERS WHERE USERNAME = ?;";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(stmt) == SQLITE_DONE) {
+                // Remove existing sessions
+                for (auto it = activeSessions.begin(); it != activeSessions.end(); ) {
+                    if (it->username == username) {
+                        it = activeSessions.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+                server.send(200, "text/plain", "User deleted successfully");
+            } else {
+                server.send(500, "text/plain", "Failed to delete user");
+            }
+            sqlite3_finalize(stmt);
+        } else {
+             server.send(500, "text/plain", "Database error");
+        }
+    } else {
+        server.send(400, "text/plain", "Missing arguments");
+    }
+}
+
+
 void initWebServer() {
 
     const char* headerkeys[] = {"Cookie"};
@@ -282,6 +427,11 @@ void initWebServer() {
         if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
         server.send(200, "text/plain", "Upload complete");
     }, handleUpload);
+
+    server.on("/api/me", HTTP_GET, handleApiMe);
+    server.on("/api/admin/users", HTTP_GET, handleAdminUsersGet);
+    server.on("/api/admin/roles", HTTP_POST, handleAdminRolesPost);
+    server.on("/api/admin/users", HTTP_DELETE, handleAdminUsersDelete);
 
     server.onNotFound(handleStaticWebFiles);
 

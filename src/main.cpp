@@ -18,7 +18,7 @@ void setup() {
 
     //Hosts wifi access point and sets appropriate power usage
     WiFi.mode(WIFI_AP);
-    WiFi.setTxPower(WIFI_POWER_11dBm);
+    WiFi.setTxPower(WIFI_POWER_17dBm);
     WiFi.softAP(ssid, password); //defiens access point name and password
 
     //Mounts the card, if it fails it returns a failed message.
