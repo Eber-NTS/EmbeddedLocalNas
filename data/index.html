@@ -373,15 +373,6 @@
     const startDir = urlParams.get('dir') || "/";
     loadDirectory(startDir);
 
-
-    setInterval(() => {
-        if (isSearching) {
-            performSearch(currentSearchQuery);
-        } else {
-            loadDirectory(currentDirectory, false);
-        }
-    }, 3000);
-
 </script>
 </body>
 </html>

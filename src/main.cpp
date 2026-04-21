@@ -44,4 +44,5 @@ void loop() {
     //if user asked for /api/list, handleClient() pauses the loop and instead executes the handleAPIList() c++ function
     //if User asks for /upload, the handleUpload() function is called
     handleClient();
+    delay(2); // Yields CPU time to the background Wi-Fi radio tasks, preventing packet loss
 }
