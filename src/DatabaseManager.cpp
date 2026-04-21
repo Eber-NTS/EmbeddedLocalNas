@@ -35,6 +35,11 @@ bool initDatabase() {
         } else {
             sqlite3_finalize(stmt);
         }
+
+        // Seed the database with a default Admin account.
+        // The "OR IGNORE" ensures it doesn't overwrite the password if you change it later!
+        sqlite3_exec(db, "INSERT OR IGNORE INTO USERS (USERNAME, PASSWORD, ROLE) VALUES ('admin', 'admin', 1);", NULL, NULL, NULL);
+        
         return true;
     }
     return false;

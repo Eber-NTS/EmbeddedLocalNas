@@ -53,7 +53,6 @@ void handleLogin() {
         String username = server.arg("username");
         String password = server.arg("password");
 
-        // Trim whitespace to match the formatting enforced during registration
         username.trim();
         password.trim();
 
