@@ -19,11 +19,13 @@ bool initDatabase() {
         //creates a new table object, and deletes already existing tables.
         sqlite3_exec(db, "DROP TABLE IF EXISTS FILES;", NULL, NULL, NULL);
         sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS FILES (NAME TEXT, PARENT_DIR TEXT, IS_FOLDER INT, SIZE INT, LAST_MODIFIED INT);", NULL, NULL, NULL);
-        sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS USERS (USERNAME TEXT PRIMARY KEY, PASSWORD TEXT, ROLE INT DEFAULT 0);", NULL, NULL, NULL);
+        sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS USERS (USERNAME TEXT PRIMARY KEY, PASSWORD TEXT, ROLE INT DEFAULT 0, CREATED_AT INT DEFAULT 0);", NULL, NULL, NULL);
         
         // Ensures older databases are updated with the new ROLE column if it was missing previously.
         // This will safely fail (and do nothing) if the column already exists.
         sqlite3_exec(db, "ALTER TABLE USERS ADD COLUMN ROLE INT DEFAULT 0;", NULL, NULL, NULL);
+        // Future-proofing: Add CREATED_AT column for account creation tracking
+        sqlite3_exec(db, "ALTER TABLE USERS ADD COLUMN CREATED_AT INT DEFAULT 0;", NULL, NULL, NULL);
 
         // Self-Healing Check: Verify the USERS table actually has the ROLE column.
         // If ALTER TABLE failed (common on embedded SQLite), queries will permanently fail.
@@ -31,7 +33,7 @@ bool initDatabase() {
         if (sqlite3_prepare_v2(db, "SELECT ROLE FROM USERS LIMIT 1;", -1, &stmt, NULL) != SQLITE_OK) {
             Serial.println("Schema mismatch detected! Rebuilding USERS table...");
             sqlite3_exec(db, "DROP TABLE IF EXISTS USERS;", NULL, NULL, NULL);
-            sqlite3_exec(db, "CREATE TABLE USERS (USERNAME TEXT PRIMARY KEY, PASSWORD TEXT, ROLE INT DEFAULT 0);", NULL, NULL, NULL);
+            sqlite3_exec(db, "CREATE TABLE USERS (USERNAME TEXT PRIMARY KEY, PASSWORD TEXT, ROLE INT DEFAULT 0, CREATED_AT INT DEFAULT 0);", NULL, NULL, NULL);
         } else {
             sqlite3_finalize(stmt);
         }
@@ -95,13 +97,14 @@ void indexInternalDrive(String targetDir) {
 //Takes a userName and password sent from user to create an account to be used for login. The data is inserted into the User's table
 bool createUser(String username, String password, int role) {
     sqlite3_stmt *stmt;
-    const char *sql = "INSERT INTO USERS (USERNAME, PASSWORD, ROLE) VALUES (?, ?, ?);";
+    const char *sql = "INSERT INTO USERS (USERNAME, PASSWORD, ROLE, CREATED_AT) VALUES (?, ?, ?, ?);";
     
     // Prepare the statement safely
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(stmt, 2, password.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(stmt, 3, role);
+        sqlite3_bind_int(stmt, 4, (int)time(NULL)); // Stores the timestamp of creation
 
         int rc = sqlite3_step(stmt);
         sqlite3_finalize(stmt);

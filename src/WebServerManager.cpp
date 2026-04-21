@@ -338,8 +338,9 @@ static int build_users_json_callback(void *data, int argc, char **argv, char **a
 
     String username = argv[0] ? argv[0] : "Unknown";
     String role = argv[1] ? argv[1] : "0";
+    String createdAt = (argc > 2 && argv[2]) ? argv[2] : "0";
 
-    *json += "{\"username\":\"" + username + "\",\"role\":" + role + "}";
+    *json += "{\"username\":\"" + username + "\",\"role\":" + role + ",\"createdAt\":" + createdAt + "}";
     return 0;
 }
 
@@ -347,7 +348,7 @@ void handleAdminUsersGet() {
     if (!requireAdmin()) { server.send(403, "text/plain", "Forbidden"); return; }
 
     String jsonResult = "";
-    const char* sql = "SELECT USERNAME, ROLE FROM USERS;";
+    const char* sql = "SELECT USERNAME, ROLE, CREATED_AT FROM USERS;";
     sqlite3_exec(db, sql, build_users_json_callback, (void*)&jsonResult, NULL);
 
     server.send(200, "application/json", "[" + jsonResult + "]");
