@@ -100,7 +100,7 @@
 
 
     //Asks the esp32 for the contents of a specific folder.
-    async function loadDirectory(path, pushHistory = true) {
+    async function loadDirectory(path, pushHistory = true, isBackgroundPoll = false) {
 
         isSearching = false;  //Search mode is used for refreshing to a search directory. Folder mode is used for refreshing currant folder.
         if (currentDirectory !== path) { //checks if the user wants to look at a different path than from the current one.
@@ -118,7 +118,8 @@
 
         //
         try {
-            const response = await fetch(`/api/list?dir=${path}&sort=${currentSort}`);
+            const indexParam = isBackgroundPoll ? "false" : "true";
+            const response = await fetch(`/api/list?dir=${path}&sort=${currentSort}&index=${indexParam}`);
             if (response.status === 401) {
                 window.location.href = "/login.html";
                 return;
@@ -373,6 +374,14 @@
     const startDir = urlParams.get('dir') || "/";
     loadDirectory(startDir);
 
+    // Smart background polling for multi-user live updates
+    setInterval(() => {
+        if (isSearching) {
+            performSearch(currentSearchQuery); // Search is already read-only
+        } else {
+            loadDirectory(currentDirectory, false, true); // true = isBackgroundPoll (skips SD card thrashing)
+        }
+    }, 5000); 
 </script>
 </body>
 </html>

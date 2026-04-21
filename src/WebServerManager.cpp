@@ -154,7 +154,13 @@ void handleApiList() {
     context.generatedHTML = "";
 
     context.currentPath = server.hasArg("dir") ? server.arg("dir") : "/";
-    indexInternalDrive(context.currentPath);
+
+    // Only re-index the physical SD card if explicitly requested (or by default).
+    // Background UI polling will pass index=false to safely perform a read-only database query.
+    bool shouldIndex = !(server.hasArg("index") && server.arg("index") == "false");
+    if (shouldIndex) {
+        indexInternalDrive(context.currentPath);
+    }
 
     String sortOrder = server.hasArg("sort") ? server.arg("sort") : "name_asc";
     String sqlSort = "NAME ASC";
