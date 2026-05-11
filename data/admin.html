@@ -168,7 +168,7 @@
     // Fetch and populate the user table
     async function loadUsers() {
         try {
-            const response = await fetch('/api/admin/users');
+            const response = await fetch('/api/admin/users?_t=' + Date.now());
             if (!response.ok) throw new Error("Failed to fetch users");
             const users = await response.json();
             
@@ -248,7 +248,7 @@
     // Fetch and populate the activity log table
     async function loadLogs() {
         try {
-            const response = await fetch('/api/admin/logs');
+            const response = await fetch('/api/admin/logs?_t=' + Date.now());
             if (!response.ok) throw new Error("Failed to fetch logs");
             const logs = await response.json();
             
@@ -291,7 +291,7 @@
     // Fetch live system metrics
     async function loadNetworkStats() {
         try {
-            const response = await fetch('/api/admin/network');
+            const response = await fetch('/api/admin/network?_t=' + Date.now());
             if (!response.ok) return;
             const data = await response.json();
             
@@ -320,12 +320,12 @@
         try {
             // 1. Latency (Ping)
             let start = performance.now();
-            await fetch('/api/ping');
+            await fetch('/api/ping?_t=' + Date.now());
             document.getElementById('st-ping').innerText = Math.round(performance.now() - start) + " ms";
 
             // 2. Download Speed (500 KB chunk)
             start = performance.now();
-            await fetch('/api/speedtest');
+            await fetch('/api/speedtest?_t=' + Date.now());
             let timeSec = (performance.now() - start) / 1000;
             let mbps = ((500 * 8) / 1024) / timeSec; // Convert KB to Mbps
             document.getElementById('st-down').innerText = mbps.toFixed(2) + " Mbps";

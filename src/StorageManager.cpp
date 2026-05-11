@@ -6,7 +6,7 @@ bool initStorage() {
     SD_MMC.setPins(39, 38, 40);
     //   "/sdcard" becomes the root path and
     //Maps the physical root to the /sdcard directory in the virtual file system.
-    if (!SD_MMC.begin("/sdcard", true)) {
+    if (!SD_MMC.begin("/sdcard", true)) { // 'true' is required to lock 1-bit mode
         return false;
     }
     return true;
