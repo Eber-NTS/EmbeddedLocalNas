@@ -127,6 +127,13 @@
             <button class="btn btn-action" id="speedtest-btn" onclick="runSpeedTest()">Run Speed Test</button>
         </div>
         
+        <div class="speedtest-box" style="margin-top: 20px;">
+            <h3 style="margin-top: 0;">Global Upload Activity</h3>
+            <p style="color: #aaa; margin-bottom: 20px;">Live graph of all user upload speeds across the server.</p>
+            <canvas id="admin-upload-chart" width="800" height="200" style="width: 100%; background: #1a1a1a; border: 1px solid #444; border-radius: 4px; display: none;"></canvas>
+            <div id="no-upload-data" style="color: #666; padding: 20px;">No uploads recorded yet.</div>
+        </div>
+        
         <div style="text-align: right; margin-top: 15px;"><button class="btn" style="background:#444; color:white;" onclick="loadNetworkStats()">Refresh Stats</button></div>
     </div>
 </div>
@@ -308,7 +315,50 @@
             let seconds = totalSeconds % 60;
             document.getElementById('sys-uptime').innerText = `${hours}h ${minutes}m ${seconds}s`;
             
+            // Draw Global Upload Chart
+            if (data.uploadSpeeds && data.uploadSpeeds.length > 0) {
+                document.getElementById('no-upload-data').style.display = 'none';
+                drawAdminUploadChart(data.uploadSpeeds);
+            } else {
+                document.getElementById('no-upload-data').style.display = 'block';
+                document.getElementById('admin-upload-chart').style.display = 'none';
+            }
+            
         } catch (err) { console.error("Failed to fetch network stats"); }
+    }
+
+    // Draws the server-wide upload speeds
+    function drawAdminUploadChart(speeds) {
+        const canvas = document.getElementById('admin-upload-chart');
+        canvas.style.display = 'block';
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        const pad = 30;
+
+        ctx.clearRect(0, 0, w, h);
+        const max = Math.max(...speeds) * 1.2 || 1;
+
+        // Draw horizontal grid line
+        ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad, h / 2); ctx.lineTo(w - pad, h / 2); ctx.stroke();
+
+        // Draw line
+        ctx.strokeStyle = '#4dfc67'; ctx.lineWidth = 3;
+        ctx.beginPath();
+        
+        // The math step compresses points automatically based on array size
+        let step = (w - pad * 2) / Math.max(speeds.length - 1, 1);
+        
+        speeds.forEach((spd, i) => {
+            let x = speeds.length === 1 ? w / 2 : pad + (i * step);
+            let y = h - pad - ((spd / max) * (h - pad * 2));
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(x - 3, y - 3, 6, 6);
+        });
+        ctx.stroke();
     }
 
     // Perform live connection speed test
@@ -325,15 +375,19 @@
 
             // 2. Download Speed (500 KB chunk)
             start = performance.now();
-            await fetch('/api/speedtest?_t=' + Date.now());
+            const dlResponse = await fetch('/api/speedtest?_t=' + Date.now());
+            await dlResponse.arrayBuffer(); // Force the browser to wait until the entire 500KB body is downloaded!
             let timeSec = (performance.now() - start) / 1000;
             let mbps = ((500 * 8) / 1024) / timeSec; // Convert KB to Mbps
             document.getElementById('st-down').innerText = mbps.toFixed(2) + " Mbps";
 
             // 3. Upload Speed (500 KB dummy payload)
             const dummyData = new Uint8Array(500 * 1024);
+            const fd = new FormData();
+            fd.append('upload_file', new Blob([dummyData]), 'speedtest.bin'); // Wrap in FormData so ESP32 uses optimized streaming
+            
             start = performance.now();
-            await fetch('/api/speedtest', { method: 'POST', body: dummyData });
+            await fetch('/api/speedtest?_t=' + Date.now(), { method: 'POST', body: fd });
             timeSec = (performance.now() - start) / 1000;
             mbps = ((500 * 8) / 1024) / timeSec;
             document.getElementById('st-up').innerText = mbps.toFixed(2) + " Mbps";

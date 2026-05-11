@@ -94,6 +94,7 @@
                 </div>
                 <div id="progress-text" style="color: #aaa; font-size: 12px; margin-top: 5px; font-weight: bold;">0%</div>
             </div>
+            <div id="upload-stats" style="color: #4daafc; font-size: 13px; margin-top: 10px; font-weight: bold; display: none;"></div>
         </div>
 
         <div class="file-box" id="file-list">
@@ -110,6 +111,7 @@
     let currentSearchQuery = ""; //keeps track of what query was requested
     let currentSort = "name_asc"; // Default sort order
     let currentUserRole = 0; // Default to View Only to fail-safe UI until verified
+    let sessionUploadSpeeds = []; // Tracks all upload speeds in this session
 
     // Cache for folder structure to build the tree
     let folderCache = {
@@ -589,25 +591,37 @@
         const progressContainer = document.getElementById('progress-container');
         const progressBar = document.getElementById('progress-bar');
         const progressText = document.getElementById('progress-text');
+        const statsText = document.getElementById('upload-stats');
         
         submitBtn.disabled = true;
         submitBtn.innerText = "Uploading...";
         progressContainer.style.display = "block";
         progressBar.style.width = "0%";
         progressText.innerText = "0%";
+        statsText.style.display = "none";
 
         const timestamp = Math.floor(Date.now() / 1000);
         const url = `/upload?dir=${currentDirectory}&time=${timestamp}`;
 
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
+            const startTime = performance.now();
 
             // Listen for upload progress
             xhr.upload.addEventListener("progress", (event) => {
                 if (event.lengthComputable) {
                     const percentComplete = Math.round((event.loaded / event.total) * 100);
+                    
+                    // Live speed calculation
+                    const durationSec = (performance.now() - startTime) / 1000;
+                    let speedText = "";
+                    if (durationSec > 0) {
+                        const liveMbps = ((event.loaded * 8) / (1024 * 1024)) / durationSec;
+                        speedText = ` @ ${liveMbps.toFixed(2)} Mbps`;
+                    }
+                    
                     progressBar.style.width = percentComplete + "%";
-                    progressText.innerText = percentComplete + "% (" + Math.floor(event.loaded / 1024) + " KB / " + Math.floor(event.total / 1024) + " KB)";
+                    progressText.innerText = percentComplete + "% (" + Math.floor(event.loaded / 1024) + " KB / " + Math.floor(event.total / 1024) + " KB)" + speedText;
                 }
             });
 
@@ -624,6 +638,16 @@
                 }
 
                 if (xhr.status === 200) {
+                    // Final speed and average calculations
+                    const totalDurationSec = (performance.now() - startTime) / 1000;
+                    const finalMbps = ((file.size * 8) / (1024 * 1024)) / totalDurationSec;
+                    
+                    sessionUploadSpeeds.push(finalMbps);
+                    const avgMbps = sessionUploadSpeeds.reduce((a, b) => a + b, 0) / sessionUploadSpeeds.length;
+                    
+                    statsText.innerText = `Last Upload: ${totalDurationSec.toFixed(1)}s (${finalMbps.toFixed(2)} Mbps) | Session Avg: ${avgMbps.toFixed(2)} Mbps`;
+                    statsText.style.display = "block";
+
                     document.getElementById('upload-input').value = "";
                     lastDataJson = ""; // Force re-render
                     await loadDirectory(currentDirectory, false);
@@ -647,6 +671,7 @@
             xhr.send(formData);
         });
     }
+
 
     document.getElementById('upload-form').addEventListener('submit', async (e) => {
         e.preventDefault();

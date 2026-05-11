@@ -438,6 +438,9 @@ void handleRename() {
     }
 }
 
+static uint32_t currentUploadStartTime = 0;
+std::vector<float> globalUploadSpeeds;
+
 void handleUpload() {
     if (!requireWriteAccess()) return;
 
@@ -445,6 +448,7 @@ void handleUpload() {
 
     if (upload.status == UPLOAD_FILE_START) {
         trySyncTime(); // Sync time exactly when an upload begins
+        currentUploadStartTime = millis();
         String dir = server.hasArg("dir") ? server.arg("dir") : "/";
         if (!dir.endsWith("/")) dir += "/";
         String filename = upload.filename;
@@ -474,6 +478,16 @@ void handleUpload() {
             String filename = upload.filename;
             if (filename.startsWith("/")) filename = filename.substring(1);
             String path = dir + filename;
+
+            // Calculate global upload speed and store it in RAM
+            uint32_t duration = millis() - currentUploadStartTime;
+            if (duration > 0 && upload.totalSize > 0) {
+                float mbps = ((upload.totalSize * 8.0) / (1024.0 * 1024.0)) / (duration / 1000.0);
+                globalUploadSpeeds.push_back(mbps);
+                
+                // Cap the array at 100 points to compress data and save memory
+                if (globalUploadSpeeds.size() > 100) globalUploadSpeeds.erase(globalUploadSpeeds.begin());
+            }
 
             Session* sess = getCurrentSession();
             if (sess) logActivity(sess->username, "UPLOAD", "Uploaded file: " + path);
@@ -673,7 +687,13 @@ void handleAdminNetwork() {
     json += "\"uptime\":" + String(millis()) + ",";
     json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
     json += "\"totalHeap\":" + String(ESP.getHeapSize());
-    json += "}";
+    
+    json += ",\"uploadSpeeds\":[";
+    for (size_t i = 0; i < globalUploadSpeeds.size(); ++i) {
+        json += String(globalUploadSpeeds[i], 2);
+        if (i < globalUploadSpeeds.size() - 1) json += ",";
+    }
+    json += "]}";
     
     server.send(200, "application/json", json);
 }
