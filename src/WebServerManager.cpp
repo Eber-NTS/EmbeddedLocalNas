@@ -46,7 +46,13 @@ bool isAuthenticated() {
 // checks if current session is an admin
 bool requireAdmin() {
     Session* sess = getCurrentSession();
-    return sess != nullptr && sess->role == 1;
+    return sess != nullptr && sess->role >= 2;
+}
+
+// checks if current session has write/upload permissions (Standard User or higher)
+bool requireWriteAccess() {
+    Session* sess = getCurrentSession();
+    return sess != nullptr && sess->role >= 1;
 }
 
 // Helper to securely sync time from an incoming request payload
@@ -109,8 +115,8 @@ void handleRegister() {
         }
 
         // Attempt to create user (will fail if username exists due to PRIMARY KEY)
-        // Default role is 0 (standard user)
-        if (createUser(username, password, 0)) {
+        // Default role is 1 (standard user)
+        if (createUser(username, password, 1)) {
             // Success, send back to login with success message
             server.sendHeader("Location", "/login.html?success=1");
             server.send(303);
@@ -306,7 +312,7 @@ void handleStaticWebFiles() {
 }
 
 void handleDelete() {
-    if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
+    if (!requireWriteAccess()) { server.send(403, "text/plain", "Forbidden: Read-Only Account"); return; }
 
     if (server.hasArg("file")) {
         String path = server.arg("file");
@@ -332,7 +338,7 @@ void handleDelete() {
 }
 
 void handleCreateFolder() {
-    if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
+    if (!requireWriteAccess()) { server.send(403, "text/plain", "Forbidden: Read-Only Account"); return; }
 
     if (server.hasArg("dir") && server.hasArg("name")) {
         String dir = server.arg("dir");
@@ -368,8 +374,72 @@ void handleCreateFolder() {
     }
 }
 
+void handleRename() {
+    if (!requireWriteAccess()) { server.send(403, "text/plain", "Forbidden: Read-Only Account"); return; }
+
+    if (server.hasArg("oldPath") && server.hasArg("newName")) {
+        String oldPath = server.arg("oldPath");
+        String newName = server.arg("newName");
+
+        if (!oldPath.startsWith("/")) oldPath = "/" + oldPath;
+        newName.trim();
+
+        // Input sanitization
+        if (newName.indexOf("..") != -1 || newName.indexOf("/") != -1 || newName.length() == 0) {
+            server.send(400, "text/plain", "Invalid new name");
+            return;
+        }
+
+        String lowerPath = oldPath;
+        lowerPath.toLowerCase();
+
+        if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html" || lowerPath == "/admin.html" || lowerPath.indexOf("system volume information") != -1) {
+            server.send(403, "text/plain", "Forbidden: Cannot rename system files");
+            return;
+        }
+
+        if (!SD_MMC.exists(oldPath)) {
+            server.send(404, "text/plain", "Source file/folder not found");
+            return;
+        }
+
+        int lastSlashIndex = oldPath.lastIndexOf('/');
+        String parentDir = oldPath.substring(0, lastSlashIndex + 1);
+        if (parentDir.length() == 0) parentDir = "/";
+
+        String newPath = parentDir + newName;
+
+        // Don't rename if name is the same
+        if (oldPath == newPath) {
+            server.send(200, "text/plain", "Name is identical");
+            return;
+        }
+
+        if (SD_MMC.exists(newPath)) {
+            server.send(409, "text/plain", "Destination already exists");
+            return;
+        }
+
+        if (SD_MMC.rename(oldPath, newPath)) {
+            // Update the database to reflect the new name (this avoids having to do a full SD index)
+            // If it's a folder, we'd theoretically need to update all children's PARENT_DIR paths.
+            // For simplicity and to ensure total accuracy, we will just force the next /api/list call
+            // to do a full re-index. The frontend currently forces an index=true on reload.
+
+            Session* sess = getCurrentSession();
+            if (sess) logActivity(sess->username, "RENAME", "Renamed: " + oldPath + " to " + newName);
+
+            server.send(200, "text/plain", "Renamed successfully");
+        } else {
+            server.send(500, "text/plain", "Failed to rename on SD card");
+        }
+    } else {
+        server.send(400, "text/plain", "Missing required arguments");
+    }
+}
+
 void handleUpload() {
-    if (!isAuthenticated()) return;
+    if (!requireWriteAccess()) return;
 
     HTTPUpload& upload = server.upload();
 
@@ -469,6 +539,27 @@ void handleAdminRolesPost() {
         String username = server.arg("username");
         int newRole = server.arg("role").toInt();
 
+        Session* sess = getCurrentSession();
+        
+        // Fetch target user's current role
+        int targetRole = -1;
+        sqlite3_stmt *stmtRole;
+        if (sqlite3_prepare_v2(db, "SELECT ROLE FROM USERS WHERE USERNAME = ?;", -1, &stmtRole, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(stmtRole, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(stmtRole) == SQLITE_ROW) targetRole = sqlite3_column_int(stmtRole, 0);
+            sqlite3_finalize(stmtRole);
+        }
+
+        if (targetRole == -1) { server.send(404, "text/plain", "User not found"); return; }
+
+        // Security: Cannot modify someone of equal or higher rank, and cannot promote someone to your rank or higher
+        if (targetRole >= sess->role) {
+            server.send(403, "text/plain", "Cannot modify users of equal or higher rank"); return;
+        }
+        if (newRole >= sess->role) {
+            server.send(403, "text/plain", "Cannot promote user to your rank or higher"); return;
+        }
+
         sqlite3_stmt *stmt;
         const char *sql = "UPDATE USERS SET ROLE = ? WHERE USERNAME = ?;";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -507,6 +598,20 @@ void handleAdminUsersDelete() {
         Session* sess = getCurrentSession();
         if (sess && sess->username == username) {
             server.send(400, "text/plain", "Cannot delete yourself");
+            return;
+        }
+
+        // Fetch target user's current role to prevent an Admin from deleting a Master Admin
+        int targetRole = -1;
+        sqlite3_stmt *stmtRole;
+        if (sqlite3_prepare_v2(db, "SELECT ROLE FROM USERS WHERE USERNAME = ?;", -1, &stmtRole, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(stmtRole, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(stmtRole) == SQLITE_ROW) targetRole = sqlite3_column_int(stmtRole, 0);
+            sqlite3_finalize(stmtRole);
+        }
+
+        if (targetRole >= sess->role) {
+            server.send(403, "text/plain", "Cannot delete users of equal or higher rank");
             return;
         }
 
@@ -613,12 +718,13 @@ void initWebServer() {
     server.on("/download", HTTP_GET, handleDownload);
     server.on("/delete", HTTP_GET, handleDelete);
     server.on("/api/create_folder", HTTP_POST, handleCreateFolder);
+    server.on("/api/rename", HTTP_POST, handleRename);
 
     // Open endpoint so the browser can sync time before logging in
     server.on("/api/time", HTTP_POST, handleTimeSync);
 
     server.on("/upload", HTTP_POST, []() {
-        if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
+        if (!requireWriteAccess()) { server.send(401, "text/plain", "Unauthorized"); return; }
         server.send(200, "text/plain", "Upload complete");
     }, handleUpload);
 

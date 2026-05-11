@@ -109,6 +109,7 @@
     let isSearching = false; //Keeps track if the user is currently looking at search results rather than a standard folder
     let currentSearchQuery = ""; //keeps track of what query was requested
     let currentSort = "name_asc"; // Default sort order
+    let currentUserRole = 0; // Default to View Only to fail-safe UI until verified
 
     // Cache for folder structure to build the tree
     let folderCache = {
@@ -120,8 +121,12 @@
             const response = await fetch('/api/me');
             if (response.ok) {
                 const data = await response.json();
-                if (data.role === 1) {
+                currentUserRole = data.role;
+                if (currentUserRole >= 2) {
                     document.getElementById('admin-panel-btn').style.display = 'inline-block';
+                }
+                if (currentUserRole === 0) {
+                    document.getElementById('drop-zone').style.display = 'none'; // Hide uploads for View Only
                 }
             } else if (response.status === 401) {
                 window.location.href = "/login.html";
@@ -244,7 +249,7 @@
 
             html += `
                 <li>
-                    <div class="tree-folder ${activeClass}" onclick="loadDirectory('${path}')">
+                    <div class="tree-folder ${activeClass}" onclick="loadDirectory('${path}')" ondblclick="renameItem('${path}', '${name}', true, event)">
                         ${toggleIcon}
                         <span class="tree-icon">📁</span>
                         <span>${name}</span>
@@ -359,18 +364,17 @@
         //
         try {
             const indexParam = isBackgroundPoll ? "false" : "true";
-            const response = await fetch(`/api/list?dir=${path}&sort=${currentSort}&index=${indexParam}`);
+            const response = await fetch(`/api/list?dir=${path}&sort=${currentSort}&index=${indexParam}&_t=${Date.now()}`);
             if (response.status === 401) {
                 window.location.href = "/login.html";
                 return;
             }
 
-            const data = await response.json();
-            
-            // Only re-render if the data has changed to prevent flickering from setInterval
-            const currentDataJson = JSON.stringify(data);
-            if (currentDataJson !== lastDataJson) {
-                lastDataJson = currentDataJson;
+            // Use raw text comparison to perfectly detect changes without JSON key-order bugs
+            const rawText = await response.text();
+            if (rawText !== lastDataJson) {
+                lastDataJson = rawText;
+                const data = JSON.parse(rawText);
                 renderFiles(data.files, data.dir);
 
                 // Update tree cache for current directory with the new folder list
@@ -385,7 +389,7 @@
                             folderCache[subPath] = { fetched: false, subfolders: [], open: false };
                         }
                     });
-                    if (!isBackgroundPoll) renderTree();
+                    renderTree(); // Ensure the sidebar updates for other users' changes
                 }
             }
         } catch (err) {
@@ -427,10 +431,10 @@
                 ? `<span class="action-link" style="color: #fce84d;" onclick="loadDirectory('${itemPath}')">Open</span>`
                 : `<a class="action-link" style="color: #4daafc;" href="/download?file=${itemPath}">Download</a>`;
                 
-            let deleteAction = `<span class="action-link" style="color: #ff4d4d;" onclick="deleteFile('${itemPath}', '${file.name}')">Delete</span>`;
+            let deleteAction = (currentUserRole >= 1) ? `<span class="action-link" style="color: #ff4d4d;" onclick="deleteFile('${itemPath}', '${file.name}')">Delete</span>` : "";
 
             html += `
-                <div class="file-row">
+                <div class="file-row" title="Double-click to rename" ondblclick="renameItem('${itemPath}', '${file.name}', ${file.isFolder}, event)">
                     <div style="flex: 2; display: flex; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                         <span style="font-size: 24px; margin-right: 15px;">${icon}</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${file.name}</span>
                     </div>
@@ -491,17 +495,16 @@
         if (currentActive) currentActive.classList.remove('active');
 
         try {
-            const response = await fetch(`/api/search?q=${encodeURIComponent(q)}&sort=${currentSort}`);
+            const response = await fetch(`/api/search?q=${encodeURIComponent(q)}&sort=${currentSort}&_t=${Date.now()}`);
             if (response.status === 401) {
                 window.location.href = "/login.html";
                 return;
             }
 
-            const data = await response.json();
-
-            const currentDataJson = JSON.stringify(data);
-            if (currentDataJson !== lastDataJson) {
-                lastDataJson = currentDataJson;
+            const rawText = await response.text();
+            if (rawText !== lastDataJson) {
+                lastDataJson = rawText;
+                const data = JSON.parse(rawText);
                 renderSearchResults(data.files);
             }
         } catch (err) {
@@ -532,10 +535,10 @@
                 ? `<span class="action-link" style="color: #fce84d;" onclick="loadDirectory('${itemPath}')">Open</span>`
                 : `<a class="action-link" style="color: #4daafc;" href="/download?file=${itemPath}">Download</a>`;
                 
-            let deleteAction = `<span class="action-link" style="color: #ff4d4d;" onclick="deleteSearchItem('${itemPath}', '${file.name}')">Delete</span>`;
+            let deleteAction = (currentUserRole >= 1) ? `<span class="action-link" style="color: #ff4d4d;" onclick="deleteSearchItem('${itemPath}', '${file.name}')">Delete</span>` : "";
 
             html += `
-                <div class="file-row">
+                <div class="file-row" title="Double-click to rename" ondblclick="renameItem('${itemPath}', '${file.name}', ${file.isFolder}, event)">
                     <div style="flex: 2; display: flex; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                         <div style="display: flex; flex-direction: column; overflow: hidden;">
                             <div style="display: flex; align-items: center;">
@@ -728,6 +731,58 @@
         }
     }
 
+    async function renameItem(oldPath, oldName, isFolder, event) {
+        if (event) {
+            event.stopPropagation(); // Stops the folder from opening when you double click it
+            event.preventDefault(); // Prevents annoying text selection highlighting
+        }
+        
+        if (currentUserRole < 1) return; // View-only users cannot rename
+
+        const newName = prompt("Enter new name for:", oldName);
+        if (!newName || newName.trim() === "" || newName === oldName) return;
+
+        if (newName.includes("/") || newName.includes("\\") || newName.includes("..")) {
+            alert("Invalid name. Please avoid using slashes or dots.");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("oldPath", oldPath);
+        formData.append("newName", newName.trim());
+
+        try {
+            const response = await fetch('/api/rename', { method: 'POST', body: formData });
+            if (!response.ok) {
+                const errText = await response.text();
+                alert("Error renaming: " + errText);
+                return;
+            }
+
+            lastDataJson = ""; // Force re-render
+
+            // If we renamed a folder we are currently inside of, we need to "teleport"
+            if (isFolder && (currentDirectory === oldPath || currentDirectory.startsWith(oldPath + "/"))) {
+                const newPath = oldPath.substring(0, oldPath.lastIndexOf('/') + 1) + newName;
+
+                // Reset the entire tree cache to be safe
+                folderCache = { "/": { fetched: false, subfolders: [] } };
+                await initTree();
+
+                await loadDirectory(newPath, true);
+            } else {
+                // Otherwise, just refresh the current view
+                const parentDir = oldPath.substring(0, oldPath.lastIndexOf('/')) || "/";
+                if (folderCache[parentDir]) folderCache[parentDir].fetched = false;
+                await loadDirectory(currentDirectory, false);
+            }
+
+        } catch (err) {
+            console.error(err);
+            alert("Network error while renaming.");
+        }
+    }
+
     // Startup sequence
     initTree();
     const urlParams = new URLSearchParams(window.location.search);
@@ -742,6 +797,14 @@
             loadDirectory(currentDirectory, false, true); // true = isBackgroundPoll (skips SD card thrashing)
         }
     }, 5000); 
+
+    // Immediately fetch new data when the user switches back to this browser tab
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+            if (isSearching) performSearch(currentSearchQuery);
+            else loadDirectory(currentDirectory, false, true);
+        }
+    });
 </script>
 </body>
 </html>

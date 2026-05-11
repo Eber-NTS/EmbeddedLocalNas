@@ -40,8 +40,10 @@ bool initDatabase() {
         }
 
         // Seed the database with a default Admin account.
-        // The "OR IGNORE" ensures it doesn't overwrite the password if it is changed later on
-        sqlite3_exec(db, "INSERT OR IGNORE INTO USERS (USERNAME, PASSWORD, ROLE) VALUES ('admin', 'admin', 1);", NULL, NULL, NULL);
+        // Master Admin is assigned Role 3
+        sqlite3_exec(db, "INSERT OR IGNORE INTO USERS (USERNAME, PASSWORD, ROLE) VALUES ('admin', 'admin', 3);", NULL, NULL, NULL);
+        // Force upgrade the 'admin' account to Master Admin in case it already existed as a lower role
+        sqlite3_exec(db, "UPDATE USERS SET ROLE = 3 WHERE USERNAME = 'admin';", NULL, NULL, NULL);
         
         return true;
     }
@@ -95,7 +97,7 @@ void indexInternalDrive(String targetDir) {
     sqlite3_exec(db, "COMMIT;",NULL, NULL, NULL);
 }
 
-//Takes a userName and password sent from user to create an account to be used for login. The data is inserted into the User's table
+//Takes a userName and password sent from user to create an account to be used for login. Default role is 1 (Standard User).
 bool createUser(String username, String password, int role) {
     sqlite3_stmt *stmt;
     const char *sql = "INSERT INTO USERS (USERNAME, PASSWORD, ROLE, CREATED_AT) VALUES (?, ?, ?, ?);";
