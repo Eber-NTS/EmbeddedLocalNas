@@ -13,13 +13,13 @@ const char* password = "helloworld";
 
 //Setup function, runs once before main loop.
 void setup() {
-    Serial.begin(115200); //sets polling rate (bps) for data viewing
-    delay(2000); //allows esp32 enough time to provide power to components
+    Serial.begin(115200); //sets polling rate (bps). This is used for viewing the input/output monitor.
+    delay(2000); //provides esp32 enough time to provide power to components
 
-    //Hosts wifi access point and sets appropriate power usage
+    //Hosts wifi access point and sets appropriate power
     WiFi.mode(WIFI_AP);
     WiFi.setTxPower(WIFI_POWER_17dBm);
-    WiFi.softAP(ssid, password); //defiens access point name and password
+    WiFi.softAP(ssid, password); //defines access point name and password
 
     //Mounts the card, if it fails it returns a failed message.
     if (!initStorage()) {
@@ -32,12 +32,11 @@ void setup() {
         Serial.println("Failed to open SQLite database.");
     }
     //Tells the webserver instance from webServerManager.cpp to wake
-    //runs server.begin(), telling esp32 to officially open port 80 on the access point and listen for incoming http reqeusts
-    //links URLs to c++ functions like: /upload and /api/list
+    //runs server.begin(), telling esp32 to officially open port 80 on the access point and listen for incoming http reqeust
     initWebServer();
 }
 
-//This is the main loop. runs continuously.
+//This is the main loop.
 void loop() {
     //actively checks for incoming http request.
     //When the function looks at a url request it matches to appropriate routes in initWebServer()

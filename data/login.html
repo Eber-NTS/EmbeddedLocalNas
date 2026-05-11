@@ -22,9 +22,10 @@
     <p id="success-msg" class="success">Account created! Please sign in.</p>
 
     <!-- Unified Form -->
-    <form id="auth-form" action="/login" method="POST">
+    <form id="auth-form" action="/login" method="POST" onsubmit="attachTime()">
         <input type="text" name="username" placeholder="Username" required autofocus>
         <input type="password" name="password" placeholder="Password" required>
+        <input type="hidden" name="time" id="client-time">
         <button type="submit" id="submit-btn">Sign In</button>
     </form>
 
@@ -57,6 +58,11 @@
             btn.innerText = 'Register';
             toggleLink.innerText = 'Already have an account? Sign in';
         }
+    }
+
+    // Attaches the timestamp directly to the login form submission
+    function attachTime() {
+        document.getElementById('client-time').value = Math.floor(Date.now() / 1000);
     }
 
     const urlParams = new URLSearchParams(window.location.search);

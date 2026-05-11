@@ -5,9 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ESP32 NAS SPA</title>
     <style>
-        body { background-color: #202020; color: #ffffff; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
-        .container { max-width: 800px; margin: auto; }
-        .file-box { background-color: #2d2d2d; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin-bottom: 20px;}
+        body { background-color: #202020; color: #ffffff; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
+        .header-bar { border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+
+        .main-content { display: flex; flex: 1; gap: 20px; overflow: hidden; flex-direction: column; }
+
+        @media (min-width: 768px) {
+            .main-content { flex-direction: row; }
+            .sidebar { width: 250px; flex-shrink: 0; }
+        }
+
+        .sidebar { background-color: #2d2d2d; border-radius: 8px; padding: 15px; overflow-y: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; flex-direction: column; }
+        .folder-tree { list-style-type: none; padding-left: 0; margin: 0; }
+        .folder-tree li { margin: 5px 0; }
+        .tree-folder { cursor: pointer; padding: 5px; border-radius: 4px; display: flex; align-items: center; }
+        .tree-folder:hover { background-color: #3d3d3d; }
+        .tree-folder.active { background-color: #4daafc; color: #fff; font-weight: bold; }
+        .tree-icon { margin-right: 8px; font-size: 1.2em; }
+        .nested-folders { padding-left: 20px; display: none; }
+        .nested-folders.open { display: block; }
+        .toggle-btn { cursor: pointer; margin-right: 5px; width: 15px; display: inline-block; text-align: center; }
+
+        .content-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+        .file-box { background-color: #2d2d2d; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin-bottom: 20px; flex: 1; overflow-y: auto; }
         .file-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #333; }
         .action-link { text-decoration: none; margin-right: 15px; cursor: pointer; }
         .back-btn { font-size: 20px; color: #fff; text-decoration: none; cursor: pointer; }
@@ -19,6 +40,8 @@
             border: 2px dashed #444;
             transition: all 0.3s ease;
             margin-bottom: 20px;
+            width: 100%;
+            box-sizing: border-box;
         }
         .drop-zone.dragover {
             background-color: #3d3d3d;
@@ -28,36 +51,55 @@
 </head>
 <body>
 
-<div class="container">
-    <div style="border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-        <h2 id="current-dir-header" style="margin: 0;">Loading...</h2>
-        <div style="display: flex; gap: 5px;">
-            <select id="sort-select" onchange="onSortChange()" style="padding: 8px; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: white;">
-                <option value="name_asc">Name (A-Z)</option>
-                <option value="name_desc">Name (Z-A)</option>
-                <option value="date_desc">Newest First</option>
-                <option value="date_asc">Oldest First</option>
-            </select>
-            <input type="text" id="search-input" placeholder="Search files..." style="padding: 8px; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: white;">
-            <button onclick="performSearch()" style="background-color: #4daafc; padding: 8px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Search</button>
-            <button id="admin-panel-btn" onclick="window.location.href='/admin.html'" style="display: none; background-color: #fce84d; color: black; padding: 8px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; margin-left: 10px;">Admin Panel</button>
-            <button onclick="logout()" style="background-color: #ff4d4d; padding: 8px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; margin-left: 10px;">Logout</button>
+<div class="header-bar">
+    <h2 id="current-dir-header" style="margin: 0;">Loading...</h2>
+    <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+        <select id="sort-select" onchange="onSortChange()" style="padding: 8px; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: white;">
+            <option value="name_asc">Name (A-Z)</option>
+            <option value="name_desc">Name (Z-A)</option>
+            <option value="date_desc">Newest First</option>
+            <option value="date_asc">Oldest First</option>
+        </select>
+        <input type="text" id="search-input" placeholder="Search files..." style="padding: 8px; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: white;">
+        <button onclick="performSearch()" style="background-color: #4daafc; padding: 8px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Search</button>
+        <button id="admin-panel-btn" onclick="window.location.href='/admin.html'" style="display: none; background-color: #fce84d; color: black; padding: 8px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; margin-left: 10px;">Admin Panel</button>
+        <button onclick="logout()" style="background-color: #ff4d4d; padding: 8px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; margin-left: 10px;">Logout</button>
+    </div>
+</div>
+
+<div class="main-content">
+    <div class="sidebar">
+        <h3 style="margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px;">Folders</h3>
+        <ul class="folder-tree" id="folder-tree">
+            <!-- Tree will be populated here -->
+        </ul>
+    </div>
+
+    <div class="content-area">
+        <div class="drop-zone" id="drop-zone">
+            <h3>Upload File</h3>
+            <p style="color: #aaa; margin-bottom: 15px;">Drag & Drop files here, or choose a file below</p>
+            <form id="upload-form">
+                <input type="file" id="upload-input" required style="color:white; max-width: 100%;">
+                <div style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+                    <button type="submit" id="upload-btn" style="background-color: #4daafc; padding: 8px 16px; border:none; border-radius:4px; font-weight:bold; cursor: pointer; margin-top: 10px;">Upload</button>
+                    <button type="button" onclick="createNewFolder()" style="background-color: #fce84d; color: #000; padding: 8px 16px; border:none; border-radius:4px; font-weight:bold; cursor: pointer; margin-top: 10px;">+ New Folder</button>
+                </div>
+            </form>
+            
+            <!-- Upload Progress Bar Container -->
+            <div id="progress-container" style="display: none; margin-top: 15px;">
+                <div style="background: #1a1a1a; border-radius: 4px; height: 15px; overflow: hidden; border: 1px solid #444;">
+                    <div id="progress-bar" style="background: #4dfc67; width: 0%; height: 100%; transition: width 0.2s ease;"></div>
+                </div>
+                <div id="progress-text" style="color: #aaa; font-size: 12px; margin-top: 5px; font-weight: bold;">0%</div>
+            </div>
+        </div>
+
+        <div class="file-box" id="file-list">
+            <!-- Files will be populated here -->
         </div>
     </div>
-
-    <div class="drop-zone" id="drop-zone">
-        <h3>Upload File</h3>
-        <p style="color: #aaa; margin-bottom: 15px;">Drag & Drop files here, or choose a file below</p>
-        <form id="upload-form">
-            <input type="file" id="upload-input" required style="color:white;">
-            <button type="submit" id="upload-btn" style="background-color: #4daafc; padding: 8px 16px; border:none; border-radius:4px; font-weight:bold; cursor: pointer;">Upload</button>
-        </form>
-    </div>
-
-    <div class="file-box" id="file-list">
-
-    </div>
-
 </div>
 
 <script>
@@ -67,6 +109,11 @@
     let isSearching = false; //Keeps track if the user is currently looking at search results rather than a standard folder
     let currentSearchQuery = ""; //keeps track of what query was requested
     let currentSort = "name_asc"; // Default sort order
+
+    // Cache for folder structure to build the tree
+    let folderCache = {
+        "/": { fetched: false, subfolders: [] }
+    };
 
     async function checkUserRole() {
         try {
@@ -115,6 +162,175 @@
     }
     syncTime();
 
+    // Helper function to build folder path
+    function buildPath(parent, name) {
+        if (parent === "/") return "/" + name;
+        return parent + "/" + name;
+    }
+
+    // Initial root fetch for the tree
+    async function initTree() {
+        await fetchFolderData("/");
+        renderTree();
+    }
+
+    // Fetch data specifically for a folder to populate the tree
+    async function fetchFolderData(path) {
+        try {
+            // We use sort=name_asc specifically for the tree to keep it organized
+            const response = await fetch(`/api/list?dir=${path}&sort=name_asc&index=false`);
+            if (!response.ok) return;
+            const data = await response.json();
+
+            // Extract only folders
+            const folders = data.files.filter(f => f.isFolder);
+
+            if (!folderCache[path]) {
+                folderCache[path] = { fetched: true, subfolders: [], open: false };
+            }
+            folderCache[path].fetched = true;
+            folderCache[path].subfolders = folders.map(f => f.name);
+
+            // Register empty entries for the new subfolders if they don't exist
+            folders.forEach(f => {
+                const subPath = buildPath(path, f.name);
+                if (!folderCache[subPath]) {
+                    folderCache[subPath] = { fetched: false, subfolders: [], open: false };
+                }
+            });
+
+        } catch (e) {
+            console.error("Error fetching folder data for tree", e);
+        }
+    }
+
+    async function toggleFolder(path, event) {
+        if (event) {
+            event.stopPropagation(); // Prevent row click from firing
+        }
+
+        if (folderCache[path]) {
+            folderCache[path].open = !folderCache[path].open;
+
+            // If we're opening and haven't fetched yet, fetch now
+            if (folderCache[path].open && !folderCache[path].fetched) {
+                await fetchFolderData(path);
+            }
+            renderTree();
+        }
+    }
+
+    function renderTreeLevel(path) {
+        const node = folderCache[path];
+        if (!node) return "";
+
+        let html = "";
+
+        // Don't render a row for root itself, just its children
+        if (path !== "/") {
+            const pathParts = path.split('/');
+            const name = pathParts[pathParts.length - 1];
+            const isActive = currentDirectory === path;
+            const activeClass = isActive ? "active" : "";
+            const hasChildren = node.subfolders.length > 0 || !node.fetched;
+            const isOpen = node.open;
+
+            let toggleIcon = "";
+            if (hasChildren) {
+                toggleIcon = `<span class="toggle-btn" onclick="toggleFolder('${path}', event)">${isOpen ? '▼' : '▶'}</span>`;
+            } else {
+                toggleIcon = `<span class="toggle-btn" style="cursor:default;"></span>`; // placeholder for alignment
+            }
+
+            html += `
+                <li>
+                    <div class="tree-folder ${activeClass}" onclick="loadDirectory('${path}')">
+                        ${toggleIcon}
+                        <span class="tree-icon">📁</span>
+                        <span>${name}</span>
+                    </div>
+            `;
+        }
+
+        // Render children if root or if this node is open
+        if (path === "/" || node.open) {
+            const ulClass = path === "/" ? "" : "nested-folders open";
+            const ulStyle = path === "/" ? "" : "";
+
+            if (node.subfolders.length > 0) {
+                html += `<ul class="${ulClass}">`;
+                node.subfolders.forEach(sub => {
+                    html += renderTreeLevel(buildPath(path, sub));
+                });
+                html += `</ul>`;
+            } else if (path !== "/" && node.fetched) {
+                 html += `<ul class="${ulClass}"><li><span style="color:#666; font-size: 0.9em; margin-left: 25px;">(empty)</span></li></ul>`;
+            }
+        }
+
+        if (path !== "/") {
+            html += `</li>`;
+        }
+
+        return html;
+    }
+
+    function renderTree() {
+        const treeDiv = document.getElementById('folder-tree');
+
+        const isRootActive = currentDirectory === "/";
+        const rootActiveClass = isRootActive ? "active" : "";
+
+        let rootHtml = `
+            <li>
+                <div class="tree-folder ${rootActiveClass}" onclick="loadDirectory('/')">
+                    <span class="toggle-btn" onclick="toggleFolder('/', event)">${folderCache["/"].open ? '▼' : '▶'}</span>
+                    <span class="tree-icon">📁</span>
+                    <span>Root</span>
+                </div>
+            </li>
+        `;
+
+        // Render root's children directly into the main ul if open
+        if (folderCache["/"].open) {
+            let childrenHtml = "";
+            folderCache["/"].subfolders.forEach(sub => {
+                childrenHtml += renderTreeLevel("/" + sub);
+            });
+            if (childrenHtml) {
+                 rootHtml += `<ul class="nested-folders open">${childrenHtml}</ul>`;
+            }
+        }
+
+        treeDiv.innerHTML = rootHtml;
+    }
+
+    // Automatically open parents of the current directory
+    async function ensurePathOpenInTree(path) {
+        if (path === "/") {
+            folderCache["/"].open = true;
+            return;
+        }
+
+        const parts = path.split('/').filter(p => p);
+        let currentPath = "";
+
+        folderCache["/"].open = true;
+
+        for (let i = 0; i < parts.length; i++) {
+            currentPath += "/" + parts[i];
+
+            if (!folderCache[currentPath]) {
+                folderCache[currentPath] = { fetched: false, subfolders: [], open: false };
+            }
+
+            folderCache[currentPath].open = true;
+
+            if (!folderCache[currentPath].fetched) {
+                await fetchFolderData(currentPath);
+            }
+        }
+    }
 
 
     //Asks the esp32 for the contents of a specific folder.
@@ -134,6 +350,12 @@
         //changes the visible text inside the header to match the new folder just opened.
         document.getElementById('current-dir-header').innerText = "Index of: " + path;
 
+        // Ensure tree reflects current path
+        if (!isBackgroundPoll) {
+             await ensurePathOpenInTree(path);
+             renderTree();
+        }
+
         //
         try {
             const indexParam = isBackgroundPoll ? "false" : "true";
@@ -150,6 +372,21 @@
             if (currentDataJson !== lastDataJson) {
                 lastDataJson = currentDataJson;
                 renderFiles(data.files, data.dir);
+
+                // Update tree cache for current directory with the new folder list
+                const folders = data.files.filter(f => f.isFolder);
+                if (folderCache[path]) {
+                    folderCache[path].fetched = true;
+                    folderCache[path].subfolders = folders.map(f => f.name);
+
+                    folders.forEach(f => {
+                        const subPath = buildPath(path, f.name);
+                        if (!folderCache[subPath]) {
+                            folderCache[subPath] = { fetched: false, subfolders: [], open: false };
+                        }
+                    });
+                    if (!isBackgroundPoll) renderTree();
+                }
             }
         } catch (err) {
             console.error("Failed to load directory", err);
@@ -194,12 +431,12 @@
 
             html += `
                 <div class="file-row">
-                    <div style="flex: 2; display: flex; align-items: center;">
-                        <span style="font-size: 24px; margin-right: 15px;">${icon}</span>${file.name}
+                    <div style="flex: 2; display: flex; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        <span style="font-size: 24px; margin-right: 15px;">${icon}</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${file.name}</span>
                     </div>
-                    <div style="flex: 1; color: #aaa;">${dateText}</div>
-                    <div style="flex: 1; color: #aaa;">${sizeText}</div>
-                    <div style="flex: 1; text-align: right;">${primaryAction}${deleteAction}</div>
+                    <div style="flex: 1; color: #aaa; text-align: center; display: none; @media (min-width: 600px) { display: block; }">${dateText}</div>
+                    <div style="flex: 1; color: #aaa; text-align: center; display: none; @media (min-width: 400px) { display: block; }">${sizeText}</div>
+                    <div style="flex: 1; text-align: right; min-width: max-content;">${primaryAction}${deleteAction}</div>
                 </div>
             `;
         });
@@ -212,6 +449,14 @@
         
         await fetch(`/delete?file=${path}`, { method: 'GET' });
         lastDataJson = ""; // Force re-render
+
+        // Remove from tree cache if it's a folder
+        const parentPath = currentDirectory;
+        if (folderCache[parentPath]) {
+            folderCache[parentPath].subfolders = folderCache[parentPath].subfolders.filter(f => f !== name);
+            renderTree();
+        }
+
         loadDirectory(currentDirectory, false); // Instantly refresh folder list
     }
     
@@ -221,6 +466,12 @@
         
         await fetch(`/delete?file=${path}`, { method: 'GET' });
         lastDataJson = ""; // Force re-render
+
+        // We'd need the parent dir to update the tree cache here accurately,
+        // but for search view a full refresh is safer anyway
+        folderCache = { "/": { fetched: false, subfolders: [] } };
+        await initTree();
+
         performSearch(currentSearchQuery); // Instantly refresh search results
     }
 
@@ -234,6 +485,10 @@
         isSearching = true;
         currentSearchQuery = q;
         document.getElementById('current-dir-header').innerText = "Search results for: " + q;
+
+        // Highlight nothing in tree during search
+        const currentActive = document.querySelector('.tree-folder.active');
+        if (currentActive) currentActive.classList.remove('active');
 
         try {
             const response = await fetch(`/api/search?q=${encodeURIComponent(q)}&sort=${currentSort}`);
@@ -281,25 +536,30 @@
 
             html += `
                 <div class="file-row">
-                    <div style="flex: 2; display: flex; align-items: center;">
-                        <div style="display: flex; flex-direction: column;">
+                    <div style="flex: 2; display: flex; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        <div style="display: flex; flex-direction: column; overflow: hidden;">
                             <div style="display: flex; align-items: center;">
-                                <span style="font-size: 24px; margin-right: 15px;">${icon}</span>${file.name}
+                                <span style="font-size: 24px; margin-right: 15px;">${icon}</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${file.name}</span>
                             </div>
-                            <small style="color: #666; margin-left: 39px;">${file.parentDir}</small>
+                            <small style="color: #666; margin-left: 39px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${file.parentDir}</small>
                         </div>
                     </div>
-                    <div style="flex: 1; color: #aaa;">${dateText}</div>
-                    <div style="flex: 1; color: #aaa;">${sizeText}</div>
-                    <div style="flex: 1; text-align: right;">${primaryAction}${deleteAction}</div>
+                    <div style="flex: 1; color: #aaa; text-align: center; display: none; @media (min-width: 600px) { display: block; }">${dateText}</div>
+                    <div style="flex: 1; color: #aaa; text-align: center; display: none; @media (min-width: 400px) { display: block; }">${sizeText}</div>
+                    <div style="flex: 1; text-align: right; min-width: max-content;">${primaryAction}${deleteAction}</div>
                 </div>
             `;
         });
         fileListDiv.innerHTML = html;
     }
 
-    // Clears the cookie and reloads the page (which kicks them to login)
-    function logout() {
+    // Safely end session on backend, clear cookie, and redirect
+    async function logout() {
+        try {
+            await fetch('/api/logout', { method: 'POST' });
+        } catch(e) { console.error(e); }
+        
+        // Fallback clear just in case the server was offline
         document.cookie = "ESP32_SESSION=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
         window.location.href = "/login.html";
     }
@@ -323,28 +583,66 @@
         formData.append('upload_file', file);
 
         const submitBtn = document.getElementById('upload-btn');
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        
         submitBtn.disabled = true;
         submitBtn.innerText = "Uploading...";
+        progressContainer.style.display = "block";
+        progressBar.style.width = "0%";
+        progressText.innerText = "0%";
 
-        try {
-            const response = await fetch(`/upload?dir=${currentDirectory}`, {
-                method: 'POST',
-                body: formData
+        const timestamp = Math.floor(Date.now() / 1000);
+        const url = `/upload?dir=${currentDirectory}&time=${timestamp}`;
+
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+
+            // Listen for upload progress
+            xhr.upload.addEventListener("progress", (event) => {
+                if (event.lengthComputable) {
+                    const percentComplete = Math.round((event.loaded / event.total) * 100);
+                    progressBar.style.width = percentComplete + "%";
+                    progressText.innerText = percentComplete + "% (" + Math.floor(event.loaded / 1024) + " KB / " + Math.floor(event.total / 1024) + " KB)";
+                }
             });
-            
-            if (response.status === 401) {
-                window.location.href = "/login.html";
-                return;
-            }
-            document.getElementById('upload-input').value = "";
-            lastDataJson = ""; // Force re-render
-            await loadDirectory(currentDirectory, false);
-        } catch (err) {
-            alert("Upload failed");
-        } finally {
-            submitBtn.disabled = false;
-            submitBtn.innerText = "Upload";
-        }
+
+            // Listen for completion
+            xhr.addEventListener("load", async () => {
+                submitBtn.disabled = false;
+                submitBtn.innerText = "Upload";
+                progressContainer.style.display = "none";
+
+                if (xhr.status === 401) {
+                    window.location.href = "/login.html";
+                    reject("Unauthorized");
+                    return;
+                }
+
+                if (xhr.status === 200) {
+                    document.getElementById('upload-input').value = "";
+                    lastDataJson = ""; // Force re-render
+                    await loadDirectory(currentDirectory, false);
+                    resolve();
+                } else {
+                    alert("Upload failed with status: " + xhr.status);
+                    reject("Server Error");
+                }
+            });
+
+            // Listen for network errors
+            xhr.addEventListener("error", () => {
+                submitBtn.disabled = false;
+                submitBtn.innerText = "Upload";
+                progressContainer.style.display = "none";
+                alert("Upload failed due to a network error");
+                reject("Network Error");
+            });
+
+            xhr.open("POST", url, true);
+            xhr.send(formData);
+        });
     }
 
     document.getElementById('upload-form').addEventListener('submit', async (e) => {
@@ -387,7 +685,51 @@
         await uploadFile(files[0]);
     });
 
+    // Create a new folder
+    async function createNewFolder() {
+        const folderName = prompt("Enter new folder name:");
+        if (!folderName || folderName.trim() === "") return;
 
+        // Basic validation
+        if (folderName.includes("/") || folderName.includes("\\") || folderName.includes("..")) {
+            alert("Invalid folder name. Please avoid using slashes or dots.");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("dir", currentDirectory);
+        formData.append("name", folderName.trim());
+
+        try {
+            const response = await fetch('/api/create_folder', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.status === 401) {
+                window.location.href = "/login.html";
+                return;
+            }
+
+            if (response.ok) {
+                lastDataJson = ""; // Force re-render
+                
+                // Clear the tree cache for this path so the new folder shows up immediately on the left panel
+                if (folderCache[currentDirectory]) folderCache[currentDirectory].fetched = false;
+                
+                await loadDirectory(currentDirectory, false); // Instantly refresh folder list
+            } else {
+                const errText = await response.text();
+                alert("Error creating folder: " + errText);
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Network error while creating folder.");
+        }
+    }
+
+    // Startup sequence
+    initTree();
     const urlParams = new URLSearchParams(window.location.search);
     const startDir = urlParams.get('dir') || "/";
     loadDirectory(startDir);

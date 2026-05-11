@@ -20,15 +20,16 @@ bool initDatabase() {
         sqlite3_exec(db, "DROP TABLE IF EXISTS FILES;", NULL, NULL, NULL);
         sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS FILES (NAME TEXT, PARENT_DIR TEXT, IS_FOLDER INT, SIZE INT, LAST_MODIFIED INT);", NULL, NULL, NULL);
         sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS USERS (USERNAME TEXT PRIMARY KEY, PASSWORD TEXT, ROLE INT DEFAULT 0, CREATED_AT INT DEFAULT 0);", NULL, NULL, NULL);
+        sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS ACTIVITY_LOG (ID INTEGER PRIMARY KEY AUTOINCREMENT, USERNAME TEXT, ACTION TEXT, DETAILS TEXT, TIMESTAMP INT);", NULL, NULL, NULL);
         
         // Ensures older databases are updated with the new ROLE column if it was missing previously.
         // This will safely fail (and do nothing) if the column already exists.
         sqlite3_exec(db, "ALTER TABLE USERS ADD COLUMN ROLE INT DEFAULT 0;", NULL, NULL, NULL);
-        // Future-proofing: Add CREATED_AT column for account creation tracking
+        // CREATED_AT column for account creation tracking
         sqlite3_exec(db, "ALTER TABLE USERS ADD COLUMN CREATED_AT INT DEFAULT 0;", NULL, NULL, NULL);
 
-        // Self-Healing Check: Verify the USERS table actually has the ROLE column.
-        // If ALTER TABLE failed (common on embedded SQLite), queries will permanently fail.
+        // Verify the USERS table actually has the ROLE column.
+        // If ALTER TABLE failed, queries will permanently fail.
         sqlite3_stmt *stmt;
         if (sqlite3_prepare_v2(db, "SELECT ROLE, CREATED_AT FROM USERS LIMIT 1;", -1, &stmt, NULL) != SQLITE_OK) {
             Serial.println("Schema mismatch detected! Rebuilding USERS table...");
@@ -39,7 +40,7 @@ bool initDatabase() {
         }
 
         // Seed the database with a default Admin account.
-        // The "OR IGNORE" ensures it doesn't overwrite the password if you change it later!
+        // The "OR IGNORE" ensures it doesn't overwrite the password if it is changed later on
         sqlite3_exec(db, "INSERT OR IGNORE INTO USERS (USERNAME, PASSWORD, ROLE) VALUES ('admin', 'admin', 1);", NULL, NULL, NULL);
         
         return true;
@@ -70,7 +71,7 @@ void indexInternalDrive(String targetDir) {
     File file = root.openNextFile();
     while (file) {
         String fileName = file.name();
-        //if file name starts with /, we remove it to have a clean name
+        //if file name starts with '/', we remove it to have a clean name
         if (fileName.startsWith("/")) fileName = fileName.substring(1);
         
         String lowerName = fileName;
@@ -139,4 +140,21 @@ int verifyUser(String username, String password) {
         sqlite3_finalize(stmt);
     }
     return role;
+}
+
+void logActivity(String username, String action, String details) {
+    sqlite3_stmt *stmt;
+    const char *sql = "INSERT INTO ACTIVITY_LOG (USERNAME, ACTION, DETAILS, TIMESTAMP) VALUES (?, ?, ?, ?);";
+    
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, action.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 3, details.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 4, (int)time(NULL));
+        
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    } else {
+        Serial.printf("SQLite Prepare Error (logActivity): %s\n", sqlite3_errmsg(db));
+    }
 }

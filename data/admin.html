@@ -12,6 +12,7 @@
         .btn-back { background-color: #4daafc; color: #000; }
         .btn-danger { background-color: #ff4d4d; color: #000; }
         .btn-promote { background-color: #fce84d; color: #000; }
+        .btn-action { background-color: #4dfc67; color: #000; padding: 10px 20px; font-size: 16px; margin-top: 15px; }
         
         /* Tabs */
         .tabs { display: flex; border-bottom: 2px solid #444; margin-bottom: 20px; }
@@ -29,6 +30,16 @@
         .badge { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; }
         .badge-admin { background-color: #fce84d; color: #000; }
         .badge-user { background-color: #4daafc; color: #000; }
+        
+        /* Network Dashboard */
+        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .card { background-color: #2d2d2d; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border-top: 3px solid #4daafc; }
+        .card h4 { margin: 0 0 10px 0; color: #aaa; text-transform: uppercase; font-size: 12px; }
+        .card .value { font-size: 24px; font-weight: bold; color: #fff; }
+        
+        .speedtest-box { background-color: #1a1a1a; padding: 30px; border-radius: 8px; text-align: center; border: 1px solid #444; }
+        .speed-metrics { display: flex; justify-content: space-around; margin-top: 20px; }
+        .metric { font-size: 20px; font-weight: bold; color: #fce84d; }
     </style>
 </head>
 <body>
@@ -42,6 +53,7 @@
     <div class="tabs">
         <div class="tab active" onclick="switchTab('users-tab', this)">User Management</div>
         <div class="tab" onclick="switchTab('activity-tab', this)">Activity Log</div>
+        <div class="tab" onclick="switchTab('network-tab', this)">Network & System</div>
     </div>
 
     <!-- USER MANAGEMENT TAB -->
@@ -63,10 +75,56 @@
 
     <!-- ACTIVITY LOG TAB (Placeholder for future architecture) -->
     <div id="activity-tab" class="tab-content">
-        <div style="background-color: #2d2d2d; padding: 40px; text-align: center; border-radius: 8px; border: 2px dashed #444;">
-            <h3 style="color: #aaa;">Activity Logging</h3>
-            <p style="color: #666;">This feature is currently under construction. Future updates will track file uploads, downloads, and deletions here.</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date & Time</th>
+                    <th>User</th>
+                    <th>Action</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody id="logs-tbody">
+                <tr><td colspan="4" style="text-align: center; color: #aaa;">Loading logs...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- NETWORK & SYSTEM TAB -->
+    <div id="network-tab" class="tab-content">
+        <div class="dashboard-grid">
+            <div class="card">
+                <h4>Connected Devices</h4>
+                <div class="value" id="sys-clients">--</div>
+            </div>
+            <div class="card">
+                <h4>System Uptime</h4>
+                <div class="value" id="sys-uptime">--</div>
+            </div>
+            <div class="card">
+                <h4>Available RAM</h4>
+                <div class="value" id="sys-ram">--</div>
+            </div>
+            <div class="card">
+                <h4>MAC Address</h4>
+                <div class="value" id="sys-mac" style="font-size: 16px;">--</div>
+            </div>
         </div>
+        
+        <div class="speedtest-box">
+            <h3 style="margin-top: 0;">Wi-Fi Performance Test</h3>
+            <p style="color: #aaa; margin-bottom: 20px;">Measures connection speed directly between your device and the ESP32.</p>
+            
+            <div class="speed-metrics">
+                <div><div style="color:#aaa; font-size:12px;">LATENCY</div><div class="metric" id="st-ping">--</div></div>
+                <div><div style="color:#aaa; font-size:12px;">DOWNLOAD</div><div class="metric" id="st-down">--</div></div>
+                <div><div style="color:#aaa; font-size:12px;">UPLOAD</div><div class="metric" id="st-up">--</div></div>
+            </div>
+            
+            <button class="btn btn-action" id="speedtest-btn" onclick="runSpeedTest()">Run Speed Test</button>
+        </div>
+        
+        <div style="text-align: right; margin-top: 15px;"><button class="btn" style="background:#444; color:white;" onclick="loadNetworkStats()">Refresh Stats</button></div>
     </div>
 </div>
 
@@ -79,6 +137,9 @@
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         document.getElementById(tabId).classList.add('active');
         element.classList.add('active');
+        
+        if (tabId === 'activity-tab') loadLogs();
+        if (tabId === 'network-tab') loadNetworkStats();
     }
 
     // Ensure only admins can access this page
@@ -93,7 +154,7 @@
                 return;
             }
             currentUser = data.username;
-            loadUsers();
+            await loadUsers();
         } catch (err) {
             window.location.href = "/login.html";
         }
@@ -156,17 +217,115 @@
         
         const formData = new URLSearchParams();
         formData.append("username", username);
-        formData.append("role", 1); // 1 = Admin
+        formData.append("role", "1"); // 1 = Admin
 
         await fetch('/api/admin/roles', { method: 'POST', body: formData });
-        loadUsers(); // Refresh the table
+        await loadUsers(); // Refresh the table
     }
 
     async function deleteUser(username) {
         if (!confirm(`WARNING: Are you absolutely sure you want to delete the account '${username}'? This cannot be undone.`)) return;
 
         await fetch(`/api/admin/users?username=${encodeURIComponent(username)}`, { method: 'DELETE' });
-        loadUsers(); // Refresh the table
+        await loadUsers(); // Refresh the table
+    }
+
+    // Fetch and populate the activity log table
+    async function loadLogs() {
+        try {
+            const response = await fetch('/api/admin/logs');
+            if (!response.ok) throw new Error("Failed to fetch logs");
+            const logs = await response.json();
+            
+            const tbody = document.getElementById('logs-tbody');
+            tbody.innerHTML = "";
+
+            if (logs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #aaa;">No activity recorded yet.</td></tr>';
+                return;
+            }
+
+            logs.forEach(log => {
+                let dateText = "Unknown";
+                if (log.timestamp > 0) {
+                    const d = new Date(log.timestamp * 1000);
+                    dateText = d.toLocaleDateString() + " " + d.toLocaleTimeString();
+                }
+                
+                let actionBadge = `<span class="badge" style="background-color: #555;">${log.action}</span>`;
+                if (log.action === 'LOGIN') actionBadge = `<span class="badge" style="background-color: #4dfc67; color: #000;">LOGIN</span>`;
+                if (log.action === 'LOGOUT') actionBadge = `<span class="badge" style="background-color: #aaa; color: #000;">LOGOUT</span>`;
+                if (log.action === 'UPLOAD') actionBadge = `<span class="badge" style="background-color: #4daafc; color: #000;">UPLOAD</span>`;
+                if (log.action === 'DELETE') actionBadge = `<span class="badge" style="background-color: #ff4d4d; color: #000;">DELETE</span>`;
+
+                tbody.innerHTML += `
+                    <tr>
+                        <td style="white-space: nowrap; color: #aaa; font-size: 13px;">${dateText}</td>
+                        <td style="font-weight: bold;">${log.username}</td>
+                        <td>${actionBadge}</td>
+                        <td style="color: #ccc; word-break: break-all;">${log.details}</td>
+                    </tr>
+                `;
+            });
+        } catch (err) {
+            console.error(err);
+            alert("Failed to load activity logs.");
+        }
+    }
+
+    // Fetch live system metrics
+    async function loadNetworkStats() {
+        try {
+            const response = await fetch('/api/admin/network');
+            if (!response.ok) return;
+            const data = await response.json();
+            
+            document.getElementById('sys-clients').innerText = data.clients;
+            document.getElementById('sys-mac').innerText = data.mac;
+            
+            // Format RAM to KB
+            document.getElementById('sys-ram').innerText = Math.floor(data.freeHeap / 1024) + " KB";
+            
+            // Format Uptime
+            let totalSeconds = Math.floor(data.uptime / 1000);
+            let hours = Math.floor(totalSeconds / 3600);
+            let minutes = Math.floor((totalSeconds % 3600) / 60);
+            let seconds = totalSeconds % 60;
+            document.getElementById('sys-uptime').innerText = `${hours}h ${minutes}m ${seconds}s`;
+            
+        } catch (err) { console.error("Failed to fetch network stats"); }
+    }
+
+    // Perform live connection speed test
+    async function runSpeedTest() {
+        const btn = document.getElementById('speedtest-btn');
+        btn.disabled = true;
+        btn.innerText = "Running Test... Please wait";
+        
+        try {
+            // 1. Latency (Ping)
+            let start = performance.now();
+            await fetch('/api/ping');
+            document.getElementById('st-ping').innerText = Math.round(performance.now() - start) + " ms";
+
+            // 2. Download Speed (500 KB chunk)
+            start = performance.now();
+            await fetch('/api/speedtest');
+            let timeSec = (performance.now() - start) / 1000;
+            let mbps = ((500 * 8) / 1024) / timeSec; // Convert KB to Mbps
+            document.getElementById('st-down').innerText = mbps.toFixed(2) + " Mbps";
+
+            // 3. Upload Speed (500 KB dummy payload)
+            const dummyData = new Uint8Array(500 * 1024);
+            start = performance.now();
+            await fetch('/api/speedtest', { method: 'POST', body: dummyData });
+            timeSec = (performance.now() - start) / 1000;
+            mbps = ((500 * 8) / 1024) / timeSec;
+            document.getElementById('st-up').innerText = mbps.toFixed(2) + " Mbps";
+        } catch (e) { alert("Speed test failed!"); }
+        
+        btn.disabled = false;
+        btn.innerText = "Run Speed Test";
     }
 
     // Boot sequence

@@ -4,6 +4,7 @@
 #include "SD_MMC.h"
 #include <vector>
 #include <sys/time.h>
+#include <WiFi.h>
 
 WebServer server(80);
 File fsUploadFile;
@@ -48,8 +49,23 @@ bool requireAdmin() {
     return sess != nullptr && sess->role == 1;
 }
 
+// Helper to securely sync time from an incoming request payload
+void trySyncTime() {
+    if (server.hasArg("time")) {
+        long timestamp = server.arg("time").toInt();
+        // Sanity check to ensure valid modern timestamp (e.g. > Year 2020)
+        if (timestamp > 1600000000) {
+            struct timeval tv;
+            tv.tv_sec = timestamp;
+            tv.tv_usec = 0;
+            settimeofday(&tv, NULL);
+        }
+    }
+}
+
 //Processes the form submission from a user login attempt.
 void handleLogin() {
+    trySyncTime(); // Sync time if provided in the login form
     if (server.hasArg("username") && server.hasArg("password")) {
         String username = server.arg("username");
         String password = server.arg("password");
@@ -60,6 +76,7 @@ void handleLogin() {
         int role = verifyUser(username, password);
         if (role != -1) {
             // Generate a random session token upon successful login
+            logActivity(username, "LOGIN", "Successful login");
             String token = "ESP32_SESSION=" + String(esp_random());
             activeSessions.push_back({token, username, role});
 
@@ -76,6 +93,7 @@ void handleLogin() {
 
 // Processes new account creation
 void handleRegister() {
+    trySyncTime(); // Sync time if provided in the register form
     if (server.hasArg("username") && server.hasArg("password")) {
         String username = server.arg("username");
         String password = server.arg("password");
@@ -106,6 +124,23 @@ void handleRegister() {
     }
     server.sendHeader("Location", "/login.html?error=3");
     server.send(303);
+}
+
+// Safely destroys the session on the backend and logs the user out
+void handleLogout() {
+    Session* sess = getCurrentSession();
+    if (sess) {
+        logActivity(sess->username, "LOGOUT", "User logged out");
+        
+        // Find and erase the session from memory
+        for (auto it = activeSessions.begin(); it != activeSessions.end(); ) {
+            if (it->token == sess->token) it = activeSessions.erase(it);
+            else ++it;
+        }
+    }
+    // Force browser to clear the cookie
+    server.sendHeader("Set-Cookie", "ESP32_SESSION=; expires=Thu, 01 Jan 1970 00:00:00 UTC; Path=/;");
+    server.send(200, "text/plain", "Logged out");
 }
 
 //data container used to pass state between web server routing functions and the SQLite database callback function
@@ -286,6 +321,8 @@ void handleDelete() {
         }
 
         if (deleteFileOrFolder(path)) {
+            Session* sess = getCurrentSession();
+            if (sess) logActivity(sess->username, "DELETE", "Deleted item: " + path);
             server.send(200, "text/plain", "Deleted successfully");
             return;
         }
@@ -294,12 +331,50 @@ void handleDelete() {
     server.send(500, "text/plain", "Failed to delete");
 }
 
+void handleCreateFolder() {
+    if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
+
+    if (server.hasArg("dir") && server.hasArg("name")) {
+        String dir = server.arg("dir");
+        String name = server.arg("name");
+
+        // Input sanitization
+        name.trim();
+        if (!dir.endsWith("/")) dir += "/";
+        if (name.startsWith("/")) name = name.substring(1);
+
+        // Prevent directory traversal attacks
+        if (name.indexOf("..") != -1 || name.indexOf("/") != -1 || name.length() == 0) {
+            server.send(400, "text/plain", "Invalid folder name");
+            return;
+        }
+
+        String fullPath = dir + name;
+
+        if (SD_MMC.exists(fullPath)) {
+            server.send(409, "text/plain", "Folder already exists");
+            return;
+        }
+
+        if (SD_MMC.mkdir(fullPath)) {
+            Session* sess = getCurrentSession();
+            if (sess) logActivity(sess->username, "CREATE_FOLDER", "Created folder: " + fullPath);
+            server.send(200, "text/plain", "Folder created successfully");
+        } else {
+            server.send(500, "text/plain", "Failed to create folder on SD card");
+        }
+    } else {
+        server.send(400, "text/plain", "Missing required arguments");
+    }
+}
+
 void handleUpload() {
     if (!isAuthenticated()) return;
 
     HTTPUpload& upload = server.upload();
 
     if (upload.status == UPLOAD_FILE_START) {
+        trySyncTime(); // Sync time exactly when an upload begins
         String dir = server.hasArg("dir") ? server.arg("dir") : "/";
         if (!dir.endsWith("/")) dir += "/";
         String filename = upload.filename;
@@ -323,6 +398,15 @@ void handleUpload() {
     } else if (upload.status == UPLOAD_FILE_END) {
         if (fsUploadFile) {
             fsUploadFile.close();
+            
+            String dir = server.hasArg("dir") ? server.arg("dir") : "/";
+            if (!dir.endsWith("/")) dir += "/";
+            String filename = upload.filename;
+            if (filename.startsWith("/")) filename = filename.substring(1);
+            String path = dir + filename;
+
+            Session* sess = getCurrentSession();
+            if (sess) logActivity(sess->username, "UPLOAD", "Uploaded file: " + path);
             Serial.printf("Upload Complete: %s, Size: %u bytes\n", upload.filename.c_str(), upload.totalSize);
         }
     }
@@ -452,6 +536,67 @@ void handleAdminUsersDelete() {
     }
 }
 
+static int build_logs_json_callback(void *data, int argc, char **argv, char **azColName) {
+    String* json = (String*)data;
+    if (json->length() > 0) *json += ",";
+
+    String username = argv[0] ? argv[0] : "Unknown";
+    String action = argv[1] ? argv[1] : "UNKNOWN";
+    String details = argv[2] ? argv[2] : "";
+    String timestamp = argv[3] ? argv[3] : "0";
+
+    details.replace("\"", "\\\""); // Escape double quotes inside the JSON string
+
+    *json += "{\"username\":\"" + username + "\",\"action\":\"" + action + "\",\"details\":\"" + details + "\",\"timestamp\":" + timestamp + "}";
+    return 0;
+}
+
+void handleAdminLogsGet() {
+    if (!requireAdmin()) { server.send(403, "text/plain", "Forbidden"); return; }
+    String jsonResult = "";
+    const char* sql = "SELECT USERNAME, ACTION, DETAILS, TIMESTAMP FROM ACTIVITY_LOG ORDER BY TIMESTAMP DESC LIMIT 100;";
+    sqlite3_exec(db, sql, build_logs_json_callback, (void*)&jsonResult, NULL);
+    server.send(200, "application/json", "[" + jsonResult + "]");
+}
+
+void handleAdminNetwork() {
+    if (!requireAdmin()) { server.send(403, "text/plain", "Forbidden"); return; }
+    
+    String json = "{";
+    json += "\"clients\":" + String(WiFi.softAPgetStationNum()) + ",";
+    json += "\"mac\":\"" + WiFi.softAPmacAddress() + "\",";
+    json += "\"uptime\":" + String(millis()) + ",";
+    json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
+    json += "\"totalHeap\":" + String(ESP.getHeapSize());
+    json += "}";
+    
+    server.send(200, "application/json", json);
+}
+
+void handleApiPing() {
+    // Simple ultra-fast endpoint to measure latency
+    server.send(200, "text/plain", "pong");
+}
+
+void handleSpeedTestGet() {
+    if (!requireAdmin()) { server.send(403, "text/plain", "Forbidden"); return; }
+    
+    // Send 500KB of dummy data to measure download speed
+    server.setContentLength(512000);
+    server.send(200, "application/octet-stream", "");
+    
+    WiFiClient client = server.client();
+    uint8_t buf[2048];
+    memset(buf, '0', sizeof(buf)); // Fill buffer with zeros
+    
+    size_t bytesSent = 0;
+    while (bytesSent < 512000) {
+        size_t toSend = (512000 - bytesSent) > sizeof(buf) ? sizeof(buf) : (512000 - bytesSent);
+        client.write(buf, toSend);
+        bytesSent += toSend;
+        delay(1); // Yield to prevent watchdog crash during tight loop
+    }
+}
 
 void initWebServer() {
 
@@ -461,11 +606,13 @@ void initWebServer() {
 
     server.on("/login", HTTP_POST, handleLogin);
     server.on("/register", HTTP_POST, handleRegister);
+    server.on("/api/logout", HTTP_POST, handleLogout);
     server.on("/", handleRoot);
     server.on("/api/list", HTTP_GET, handleApiList);
     server.on("/api/search", HTTP_GET, handleApiSearch);
     server.on("/download", HTTP_GET, handleDownload);
     server.on("/delete", HTTP_GET, handleDelete);
+    server.on("/api/create_folder", HTTP_POST, handleCreateFolder);
 
     // Open endpoint so the browser can sync time before logging in
     server.on("/api/time", HTTP_POST, handleTimeSync);
@@ -475,10 +622,21 @@ void initWebServer() {
         server.send(200, "text/plain", "Upload complete");
     }, handleUpload);
 
+    // Network and diagnostic routes
+    server.on("/api/ping", HTTP_GET, handleApiPing);
+    server.on("/api/speedtest", HTTP_GET, handleSpeedTestGet);
+    server.on("/api/speedtest", HTTP_POST, []() {
+        if (!requireAdmin()) { server.send(403, "text/plain", "Forbidden"); return; }
+        server.send(200, "text/plain", "Upload speed test complete");
+    }, []() { HTTPUpload& upload = server.upload(); }); // Empty upload handler to consume and discard dummy data
+
+
     server.on("/api/me", HTTP_GET, handleApiMe);
     server.on("/api/admin/users", HTTP_GET, handleAdminUsersGet);
     server.on("/api/admin/roles", HTTP_POST, handleAdminRolesPost);
     server.on("/api/admin/users", HTTP_DELETE, handleAdminUsersDelete);
+    server.on("/api/admin/logs", HTTP_GET, handleAdminLogsGet);
+    server.on("/api/admin/network", HTTP_GET, handleAdminNetwork);
 
     server.onNotFound(handleStaticWebFiles);
 
