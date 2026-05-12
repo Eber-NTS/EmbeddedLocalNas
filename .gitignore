@@ -1,0 +1,11 @@
+# General Editor/IDE folders
+.idea/
+.vscode/
+
+# PlatformIO
+.pio/
+
+# Common OS generated files
+.DS_Store
+Thumbs.db
+*.bak
