@@ -5,16 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ESP32 NAS SPA</title>
     <style>
+        /* --- Global & Layout Styles --- */
+        /* Sets a dark theme, uses flexbox to make the body take up exactly 100% of the viewport height (SPA style) */
         body { background-color: #202020; color: #ffffff; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
+        
+        /* Top navigation bar containing the title, search, and action buttons */
         .header-bar { border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
 
+        /* The main wrapper for the sidebar and file list. Flexes to fill the remaining vertical space */
         .main-content { display: flex; flex: 1; gap: 20px; overflow: hidden; flex-direction: column; }
 
+        /* --- Responsive Design --- */
+        /* On screens wider than 768px (Tablets/Desktops), switch to a side-by-side layout instead of stacked */
         @media (min-width: 768px) {
             .main-content { flex-direction: row; }
             .sidebar { width: 250px; flex-shrink: 0; }
         }
 
+        /* --- Sidebar & Folder Tree Styles --- */
         .sidebar { background-color: #2d2d2d; border-radius: 8px; padding: 15px; overflow-y: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; flex-direction: column; }
         .folder-tree { list-style-type: none; padding-left: 0; margin: 0; }
         .folder-tree li { margin: 5px 0; }
@@ -26,12 +34,15 @@
         .nested-folders.open { display: block; }
         .toggle-btn { cursor: pointer; margin-right: 5px; width: 15px; display: inline-block; text-align: center; }
 
+        /* --- Main Content Area (Uploads & File List) --- */
         .content-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 
         .file-box { background-color: #2d2d2d; border-radius: 8px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin-bottom: 20px; flex: 1; overflow-y: auto; }
         .file-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #333; }
         .action-link { text-decoration: none; margin-right: 15px; cursor: pointer; }
         .back-btn { font-size: 20px; color: #fff; text-decoration: none; cursor: pointer; }
+        
+        /* Drag & Drop Upload Zone Styling */
         .drop-zone {
             background-color: #2d2d2d;
             border-radius: 8px;
@@ -43,6 +54,7 @@
             width: 100%;
             box-sizing: border-box;
         }
+        /* Applied dynamically via JS when a file is dragged over the zone */
         .drop-zone.dragover {
             background-color: #3d3d3d;
             border-color: #4daafc;
@@ -51,6 +63,7 @@
         .file-date { flex: 1; color: #aaa; text-align: center; display: none; }
         .file-size { flex: 1; color: #aaa; text-align: center; display: none; }
         
+        /* Responsive columns: Hide Date and Size on small phone screens to prevent UI overlapping */
         /* Only show Size column if screen is wider than 400px, and Date if wider than 600px */
         @media (min-width: 400px) { .file-size { display: block; } }
         @media (min-width: 600px) { .file-date { display: block; } }
@@ -58,6 +71,7 @@
 </head>
 <body>
 
+<!-- HEADER SECTION: Contains dynamic folder title, sorting rules, search bar, and admin/logout buttons -->
 <div class="header-bar">
     <h2 id="current-dir-header" style="margin: 0;">Loading...</h2>
     <div style="display: flex; gap: 5px; flex-wrap: wrap;">
@@ -74,7 +88,10 @@
     </div>
 </div>
 
+<!-- MAIN APPLICATION CONTAINER -->
 <div class="main-content">
+    
+    <!-- SIDEBAR: Navigation panel for the interactive folder tree -->
     <div class="sidebar">
         <h3 style="margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px;">Folders</h3>
         <ul class="folder-tree" id="folder-tree">
@@ -82,7 +99,10 @@
         </ul>
     </div>
 
+    <!-- CONTENT AREA: Right side (or bottom on mobile) containing uploads and file lists -->
     <div class="content-area">
+        
+        <!-- UPLOAD ZONE: Handles both standard form file-picking and drag-and-drop -->
         <div class="drop-zone" id="drop-zone">
             <h3>Upload File</h3>
             <p style="color: #aaa; margin-bottom: 15px;">Drag & Drop files here, or choose a file below</p>
@@ -94,7 +114,7 @@
                 </div>
             </form>
             
-            <!-- Upload Progress Bar Container -->
+            <!-- Upload Progress Bar Container (Hidden by default, shown during XHR upload stream) -->
             <div id="progress-container" style="display: none; margin-top: 15px;">
                 <div style="background: #1a1a1a; border-radius: 4px; height: 15px; overflow: hidden; border: 1px solid #444;">
                     <div id="progress-bar" style="background: #4dfc67; width: 0%; height: 100%; transition: width 0.2s ease;"></div>
@@ -104,6 +124,7 @@
             <div id="upload-stats" style="color: #4daafc; font-size: 13px; margin-top: 10px; font-weight: bold; display: none;"></div>
         </div>
 
+        <!-- FILE LIST: Dynamically populated by JS fetch calls to the ESP32 /api/list endpoint -->
         <div class="file-box" id="file-list">
             <!-- Files will be populated here -->
         </div>
@@ -121,23 +142,28 @@
     let sessionUploadSpeeds = []; // Tracks all upload speeds in this session
 
     // Cache for folder structure to build the tree
+    // This prevents the application from having to re-fetch the entire folder structure from the ESP32 every time the user clicks a folder
     let folderCache = {
         "/": { fetched: false, subfolders: [] }
     };
 
+    // Fetches the current user's role from the ESP32 to adjust UI permissions
     async function checkUserRole() {
         try {
             const response = await fetch('/api/me');
             if (response.ok) {
                 const data = await response.json();
                 currentUserRole = data.role;
+                // If the user is an Admin (Role 2) or Master Admin (Role 3), show the Admin Panel button
                 if (currentUserRole >= 2) {
                     document.getElementById('admin-panel-btn').style.display = 'inline-block';
                 }
+                // If the user is View-Only (Role 0), completely hide the drag-and-drop upload box
                 if (currentUserRole === 0) {
                     document.getElementById('drop-zone').style.display = 'none'; // Hide uploads for View Only
                 }
             } else if (response.status === 401) {
+                // If the ESP32 says the session is invalid or missing, force the user back to the login screen
                 window.location.href = "/login.html";
             }
         } catch (err) {
@@ -148,9 +174,10 @@
     // Call checkUserRole on page load
     checkUserRole();
 
+    // Triggered when the user changes the "Sort By" dropdown menu
     function onSortChange() {
         currentSort = document.getElementById('sort-select').value;
-        lastDataJson = ""; // Force re-render on sort change
+        lastDataJson = ""; // Clear the HTML diff cache to force a complete re-render of the file list
         if (isSearching) {
             performSearch(currentSearchQuery);
         } else {
@@ -158,7 +185,8 @@
         }
     }
     
-    // Sync the browser's time to the ESP32 (since the offline NAS has no internet access)
+    // Sync the browser's time to the ESP32 (since the offline NAS has no internet access to reach an NTP server)
+    // This makes sure that created files and activity logs have accurate timestamps.
     async function syncTime() {
         if (!sessionStorage.getItem('timeSynced')) {
             const timestamp = Math.floor(Date.now() / 1000);
@@ -169,20 +197,21 @@
                     body: 'time=' + timestamp
                 });
                 if (response.ok) {
-                    sessionStorage.setItem('timeSynced', 'true');
+                    sessionStorage.setItem('timeSynced', 'true'); // Store in sessionStorage so it only syncs once per tab, preventing spam
                 }
             } catch (e) { console.error("Time sync failed", e); }
         }
     }
     syncTime();
 
-    // Helper function to build folder path
+    // Helper function to safely concatenate folder paths.
+    // Prevents generating invalid paths with double slashes like "//subfolder" when branching from the root ("/")
     function buildPath(parent, name) {
         if (parent === "/") return "/" + name;
         return parent + "/" + name;
     }
 
-    // Initial root fetch for the tree
+    // Initial root fetch for the tree. Kicks off the first API call to populate the sidebar.
     async function initTree() {
         await fetchFolderData("/");
         renderTree();
@@ -226,7 +255,7 @@
         if (folderCache[path]) {
             folderCache[path].open = !folderCache[path].open;
 
-            // If we're opening and haven't fetched yet, fetch now
+            // If opening and haven't fetched yet, fetch now
             if (folderCache[path].open && !folderCache[path].fetched) {
                 await fetchFolderData(path);
             }
@@ -234,6 +263,7 @@
         }
     }
 
+    // Recursively generates the HTML for a folder and its subdirectories in the sidebar tree.
     function renderTreeLevel(path) {
         const node = folderCache[path];
         if (!node) return "";
@@ -242,18 +272,22 @@
 
         // Don't render a row for root itself, just its children
         if (path !== "/") {
+            // Extract just the current folder's name from the full path
             const pathParts = path.split('/');
             const name = pathParts[pathParts.length - 1];
             const isActive = currentDirectory === path;
             const activeClass = isActive ? "active" : "";
+
+            // A folder might have children if the cache has items, OR if we haven't fetched it yet
             const hasChildren = node.subfolders.length > 0 || !node.fetched;
             const isOpen = node.open;
 
             let toggleIcon = "";
             if (hasChildren) {
+                // Add an expand/collapse arrow if the folder has (or might have) children
                 toggleIcon = `<span class="toggle-btn" onclick="toggleFolder('${path}', event)">${isOpen ? '▼' : '▶'}</span>`;
             } else {
-                toggleIcon = `<span class="toggle-btn" style="cursor:default;"></span>`; // placeholder for alignment
+                toggleIcon = `<span class="toggle-btn" style="cursor:default;"></span>`; // Invisible placeholder to keep text alignment aligned
             }
 
             html += `
@@ -273,11 +307,13 @@
 
             if (node.subfolders.length > 0) {
                 html += `<ul class="${ulClass}">`;
+                // Recursively call renderTreeLevel for every subfolder
                 node.subfolders.forEach(sub => {
                     html += renderTreeLevel(buildPath(path, sub));
                 });
                 html += `</ul>`;
             } else if (path !== "/" && node.fetched) {
+                 // If the folder was fetched, is open, but has no subfolders, show a placeholder
                  html += `<ul class="${ulClass}"><li><span style="color:#666; font-size: 0.9em; margin-left: 25px;">(empty)</span></li></ul>`;
             }
         }
@@ -289,12 +325,15 @@
         return html;
     }
 
+    // Entry point for drawing the sidebar folder tree.
+    // Completely replaces the contents of the #folder-tree element.
     function renderTree() {
         const treeDiv = document.getElementById('folder-tree');
 
         const isRootActive = currentDirectory === "/";
         const rootActiveClass = isRootActive ? "active" : "";
 
+        // Create a dedicated hard-coded row for the Root directory
         let rootHtml = `
             <li>
                 <div class="tree-folder ${rootActiveClass}" onclick="loadDirectory('/')">
@@ -316,6 +355,7 @@
             }
         }
 
+        // Apply the generated HTML to the DOM
         treeDiv.innerHTML = rootHtml;
     }
 
@@ -521,10 +561,14 @@
         }
     }
 
+    // Renders the list of files returned by a search query.
+    // This is different from standard folder rendering because search results can come from multiple
+    // different directories, so we must display the file's parent path underneath its name.
     function renderSearchResults(files) {
         const fileListDiv = document.getElementById('file-list');
         let html = `
             <div class="file-row">
+                <!-- Button to exit search mode and return to the folder the user was just looking at -->
                 <span class="back-btn" onclick="loadDirectory(currentDirectory)">⬅️ Back to folder</span>
             </div>
         `;
@@ -540,10 +584,12 @@
             const dateText = file.lastMod ? new Date(file.lastMod * 1000).toLocaleDateString() : "--";
             let itemPath = file.parentDir.endsWith("/") ? file.parentDir + file.name : file.parentDir + "/" + file.name;
 
+            // Determine if clicking "Open" should navigate into a folder, or download a file
             let primaryAction = file.isFolder 
                 ? `<span class="action-link" style="color: #fce84d;" onclick="loadDirectory('${itemPath}')">Open</span>`
                 : `<a class="action-link" style="color: #4daafc;" href="/download?file=${itemPath}">Download</a>`;
                 
+            // Only show the delete button if the user has Standard (Role 1) or higher permissions
             let deleteAction = (currentUserRole >= 1) ? `<span class="action-link" style="color: #ff4d4d;" onclick="deleteSearchItem('${itemPath}', '${file.name}')">Delete</span>` : "";
 
             html += `
@@ -553,6 +599,7 @@
                             <div style="display: flex; align-items: center;">
                                 <span style="font-size: 24px; margin-right: 15px;">${icon}</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${file.name}</span>
                             </div>
+                            <!-- Display the directory path where this search result was found -->
                             <small style="color: #666; margin-left: 39px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${file.parentDir}</small>
                         </div>
                     </div>
@@ -565,24 +612,28 @@
         fileListDiv.innerHTML = html;
     }
 
-    // Safely end session on backend, clear cookie, and redirect
+    // Safely end session on the backend, clear the local cookie, and redirect to the login screen
     async function logout() {
         try {
+            // Tell the ESP32 to instantly invalidate the current session token in its memory
             await fetch('/api/logout', { method: 'POST' });
         } catch(e) { console.error(e); }
         
-        // Fallback clear just in case the server was offline
+        // Fallback cookie clear, Just in case the server was offline or unreachable,
+        // force the browser to forget the cookie by setting its expiration date to the past.
         document.cookie = "ESP32_SESSION=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
         window.location.href = "/login.html";
     }
 
-    // Allow hitting "Enter" on the keyboard to trigger the search
+    // Allow hitting "Enter" on the keyboard while focused on the search box to trigger the search
     document.getElementById('search-input').addEventListener('keypress', function (e) {
         if (e.key === 'Enter') performSearch();
     });
 
+    // Listen for the browser's native "Back" and "Forward" buttons
     window.addEventListener("popstate", (event) => {
         if (event.state && event.state.path) {
+            // If we have history state, load that directory without pushing a new history state
             loadDirectory(event.state.path, false);
         } else {
             loadDirectory("/", false);
@@ -590,10 +641,12 @@
     });
 
 
+    // Handles transmitting the selected file to the ESP32
     async function uploadFile(file) {
         const formData = new FormData();
         formData.append('upload_file', file);
 
+        // Reset and show the UI progress bar components
         const submitBtn = document.getElementById('upload-btn');
         const progressContainer = document.getElementById('progress-container');
         const progressBar = document.getElementById('progress-bar');
@@ -610,34 +663,40 @@
         const timestamp = Math.floor(Date.now() / 1000);
         const url = `/upload?dir=${currentDirectory}&time=${timestamp}`;
 
+        // We wrap this in a Promise so other functions can 'await' the upload to finish.
         return new Promise((resolve, reject) => {
+            // We use the older XMLHttpRequest (XHR) instead of 'fetch' here because
+            // fetch does not currently have native support for tracking upload progress events.
             const xhr = new XMLHttpRequest();
             const startTime = performance.now();
 
-            // Listen for upload progress
+            // Event listener that is called continuously as chunks of the file are sent over the network
             xhr.upload.addEventListener("progress", (event) => {
                 if (event.lengthComputable) {
                     const percentComplete = Math.round((event.loaded / event.total) * 100);
                     
-                    // Live speed calculation
+                    // Calculate speed calculation: (Megabits) / (Seconds)
                     const durationSec = (performance.now() - startTime) / 1000;
                     let speedText = "";
                     if (durationSec > 0) {
+                        // (Bytes * 8 bits/byte) / 1,048,576 bits/Megabit
                         const liveMbps = ((event.loaded * 8) / (1024 * 1024)) / durationSec;
                         speedText = ` @ ${liveMbps.toFixed(2)} Mbps`;
                     }
                     
+                    // Update the visual progress bar width and text readouts
                     progressBar.style.width = percentComplete + "%";
                     progressText.innerText = percentComplete + "% (" + Math.floor(event.loaded / 1024) + " KB / " + Math.floor(event.total / 1024) + " KB)" + speedText;
                 }
             });
 
-            // Listen for completion
+            // Event listener that is called when the upload fully finishes (or errors out with an HTTP code)
             xhr.addEventListener("load", async () => {
                 submitBtn.disabled = false;
                 submitBtn.innerText = "Upload";
                 progressContainer.style.display = "none";
 
+                // Handle expired session during an active upload
                 if (xhr.status === 401) {
                     window.location.href = "/login.html";
                     reject("Unauthorized");
@@ -649,12 +708,14 @@
                     const totalDurationSec = (performance.now() - startTime) / 1000;
                     const finalMbps = ((file.size * 8) / (1024 * 1024)) / totalDurationSec;
                     
+                    // Add to session speeds array to calculate the rolling average
                     sessionUploadSpeeds.push(finalMbps);
                     const avgMbps = sessionUploadSpeeds.reduce((a, b) => a + b, 0) / sessionUploadSpeeds.length;
                     
                     statsText.innerText = `Last Upload: ${totalDurationSec.toFixed(1)}s (${finalMbps.toFixed(2)} Mbps) | Session Avg: ${avgMbps.toFixed(2)} Mbps`;
                     statsText.style.display = "block";
 
+                    // Clear the file picker input and force a folder refresh so the new file shows up instantly
                     document.getElementById('upload-input').value = "";
                     lastDataJson = ""; // Force re-render
                     await loadDirectory(currentDirectory, false);
@@ -674,6 +735,7 @@
                 reject("Network Error");
             });
 
+            // Open the connection and send the multipart form data payload
             xhr.open("POST", url, true);
             xhr.send(formData);
         });

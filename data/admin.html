@@ -76,7 +76,7 @@
         </table>
     </div>
 
-    <!-- ACTIVITY LOG TAB (Placeholder for future architecture) -->
+    <!-- ACTIVITY LOG TAB  -->
     <div id="activity-tab" class="tab-content">
         <table>
             <thead>
@@ -376,7 +376,7 @@
             // 2. Download Speed (500 KB chunk)
             start = performance.now();
             const dlResponse = await fetch('/api/speedtest?_t=' + Date.now());
-            await dlResponse.arrayBuffer(); // Force the browser to wait until the entire 500KB body is downloaded!
+            await dlResponse.arrayBuffer(); // Force the browser to wait until the entire 500KB body is downloaded
             let timeSec = (performance.now() - start) / 1000;
             let mbps = ((500 * 8) / 1024) / timeSec; // Convert KB to Mbps
             document.getElementById('st-down').innerText = mbps.toFixed(2) + " Mbps";

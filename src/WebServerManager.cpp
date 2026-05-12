@@ -9,7 +9,7 @@
 WebServer server(80);
 File fsUploadFile;
 
-// Struct to hold session data
+// Struct to hold session data for everyone currently logged into NAS
 struct Session {
     String token;
     String username;
@@ -19,15 +19,16 @@ struct Session {
 // Store multiple active session objects
 std::vector<Session> activeSessions;
 
-// Helper to get the current session based on the incoming cookie
+// Helper to get the current session data based on the incoming cookie
 Session* getCurrentSession() {
     if (server.hasHeader("Cookie")) {
         String cookie = server.header("Cookie");
 
+        //return the user's session data if cookie is valid
         for (auto& session : activeSessions) {
             int startIndex = cookie.indexOf(session.token);
             if (startIndex != -1) {
-                // Ensure the match is exact and not just a prefix of another value
+                //check if the match is exact and not just a prefix of another value
                 int endIndex = startIndex + session.token.length();
                 if (endIndex == cookie.length() || cookie[endIndex] == ';') {
                     return &session;
@@ -55,11 +56,12 @@ bool requireWriteAccess() {
     return sess != nullptr && sess->role >= 1;
 }
 
-// Helper to securely sync time from an incoming request payload
+// Helper to securely sync time from an incoming request payload (if browser sent a 'time' paramter
 void trySyncTime() {
     if (server.hasArg("time")) {
+        //set esp32's internal system clock to the browser's time
         long timestamp = server.arg("time").toInt();
-        // Sanity check to ensure valid modern timestamp (e.g. > Year 2020)
+        // check to ensure valid modern timestamp (year>2020)
         if (timestamp > 1600000000) {
             struct timeval tv;
             tv.tv_sec = timestamp;
@@ -72,6 +74,8 @@ void trySyncTime() {
 //Processes the form submission from a user login attempt.
 void handleLogin() {
     trySyncTime(); // Sync time if provided in the login form
+
+    //check database for matching Username and password
     if (server.hasArg("username") && server.hasArg("password")) {
         String username = server.arg("username");
         String password = server.arg("password");
@@ -82,17 +86,18 @@ void handleLogin() {
         int role = verifyUser(username, password);
         if (role != -1) {
             // Generate a random session token upon successful login
-            logActivity(username, "LOGIN", "Successful login");
+            logActivity(username, "LOGIN", "Successful login");//log successful login into activity log database
             String token = "ESP32_SESSION=" + String(esp_random());
-            activeSessions.push_back({token, username, role});
+            activeSessions.push_back({token, username, role});//send token to user's browser as a cookie
 
+            //redirect user to the main page
             server.sendHeader("Set-Cookie", token + "; Path=/; HttpOnly");
             server.sendHeader("Location", "/");
             server.send(303);
             return;
         }
     }
-    // Redirect back to login with error
+    // Redirect back to login with error if no match
     server.sendHeader("Location", "/login.html?error=1");
     server.send(303);
 }
@@ -100,6 +105,9 @@ void handleLogin() {
 // Processes new account creation
 void handleRegister() {
     trySyncTime(); // Sync time if provided in the register form
+    //attempt to create a new user in the database with role 1 (standard user)
+    //if successful, redirect to login page with succcess message
+    //if fail, redirect to login page with error message
     if (server.hasArg("username") && server.hasArg("password")) {
         String username = server.arg("username");
         String password = server.arg("password");
@@ -134,6 +142,7 @@ void handleRegister() {
 
 // Safely destroys the session on the backend and logs the user out
 void handleLogout() {
+    //identify current user
     Session* sess = getCurrentSession();
     if (sess) {
         logActivity(sess->username, "LOGOUT", "User logged out");
@@ -149,52 +158,60 @@ void handleLogout() {
     server.send(200, "text/plain", "Logged out");
 }
 
-//data container used to pass state between web server routing functions and the SQLite database callback function
+//data container used to pass data between web server routing functions and the SQLite database callback function
 struct RenderContext {
     String currentPath;
     String generatedHTML;
 };
 
+//triggered by the database for every row it finds during a search or list query
 static int build_json_callback(void *data, int argc, char **argv, char **azColName) {
+
     RenderContext* ctx = (RenderContext*)data;
 
     if (ctx->generatedHTML.length() > 0) ctx->generatedHTML += ",";
-
+    //extract Name, IsFolder, size, parantDirectory,and 'last modified' from the row
     String name = argv[0] ? argv[0] : "Unknown";
     String isFolder = argv[1] ? argv[1] : "0";
     String size = argv[2] ? argv[2] : "0";
     String parentDir = (argc > 3 && argv[3]) ? argv[3] : "";
     String lastMod = (argc > 4 && argv[4]) ? argv[4] : "0";
 
+    //format the raw c++ data into javascript object notation (json) string
+    //ex: {"name":"file.txt", "isFolder":0, "size":1024, "lastMod":167888}
     ctx->generatedHTML += "{\"name\":\"" + name + "\",\"isFolder\":" + isFolder + ",\"size\":" + size + ",\"lastMod\":" + lastMod;
     if (parentDir.length() > 0) {
         ctx->generatedHTML += ",\"parentDir\":\"" + parentDir + "\"";
     }
+    //append the created string to the RenderContect.generatedHTML;
     ctx->generatedHTML += "}";
-    return 0;
+    return 0; //tells the database to keep going to the next row, until fully traversed
 }
 
 void handleRoot() {
+    //require authentication (redirects to login if not)
     if (!isAuthenticated()) {
         server.sendHeader("Location", "/login.html");
         server.send(303);
         return;
-    }
+    } //stream the file to the browser
     if (SD_MMC.exists("/index.html")) {
         File file = SD_MMC.open("/index.html", "r");
         server.streamFile(file, "text/html");
         file.close();
-    } else {
+    } else { //return error "missing index.html
         server.send(404, "text/plain", "Missing index.html on drive. Please upload it.");
     }
 }
 
 void handleApiList() {
+    //require authentication (redirects to login if not)
     if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
 
+    //create new empty renderContext
     RenderContext context;
     context.generatedHTML = "";
-
+    //determine requested folderpath
     context.currentPath = server.hasArg("dir") ? server.arg("dir") : "/";
 
     // Only re-index the physical SD card if explicitly requested (or by default).
@@ -204,15 +221,17 @@ void handleApiList() {
         indexInternalDrive(context.currentPath);
     }
 
+    //determine sort order (user's preference)
     String sortOrder = server.hasArg("sort") ? server.arg("sort") : "name_asc";
     String sqlSort = "NAME ASC";
     if (sortOrder == "name_desc") sqlSort = "NAME DESC";
     else if (sortOrder == "date_desc") sqlSort = "LAST_MODIFIED DESC";
     else if (sortOrder == "date_asc") sqlSort = "LAST_MODIFIED ASC";
 
+    //query the dtabase for all files inside the requested folder (in selected sorted order)
     // We use NULL for parent_dir so that LAST_MODIFIED is perfectly aligned at index 4 for our callback
     char *query = sqlite3_mprintf("SELECT NAME, IS_FOLDER, SIZE, NULL, LAST_MODIFIED FROM FILES WHERE PARENT_DIR='%q' ORDER BY IS_FOLDER DESC, %s;", context.currentPath.c_str(), sqlSort.c_str());
-    sqlite3_exec(db, query, build_json_callback, (void*)&context, NULL);
+    sqlite3_exec(db, query, build_json_callback, (void*)&context, NULL); //// (The database uses build_json_callback to fill the RenderContext with data)
     sqlite3_free(query);
 
     String json = "{\"dir\":\"" + context.currentPath + "\",\"files\":[" + context.generatedHTML + "]}";
@@ -220,12 +239,15 @@ void handleApiList() {
     server.send(200, "application/json", json);
 }
 
+
 void handleApiSearch() {
+    //require Authentication
     if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
 
     RenderContext context;
     context.generatedHTML = "";
 
+    //Determine search query string and sort order
     String queryStr = server.hasArg("q") ? server.arg("q") : "";
     String sortOrder = server.hasArg("sort") ? server.arg("sort") : "name_asc";
     String sqlSort = "NAME ASC";
@@ -233,6 +255,8 @@ void handleApiSearch() {
     else if (sortOrder == "date_desc") sqlSort = "LAST_MODIFIED DESC";
     else if (sortOrder == "date_asc") sqlSort = "LAST_MODIFIED ASC";
 
+    //QUERY the database for any files containing the search string (Limit 100 results)
+    //WRAP the results into a JSON packet and SEND to browser
     char *query = sqlite3_mprintf("SELECT NAME, IS_FOLDER, SIZE, PARENT_DIR, LAST_MODIFIED FROM FILES WHERE NAME LIKE '%%%q%%' ORDER BY IS_FOLDER DESC, %s LIMIT 100;", queryStr.c_str(), sqlSort.c_str());
     sqlite3_exec(db, query, build_json_callback, (void*)&context, NULL);
     sqlite3_free(query);
@@ -241,21 +265,25 @@ void handleApiSearch() {
     server.send(200, "application/json", json);
 }
 
+
 void handleDownload() {
+    //require Authentication
     if (!isAuthenticated()) { server.send(401, "text/plain", "Unauthorized"); return; }
 
+    //determine requested file path
     if (server.hasArg("file")) {
         String path = server.arg("file");
         if (!path.startsWith("/")) path = "/" + path;
 
         String lowerPath = path;
         lowerPath.toLowerCase();
-
+        //if file is a system file->block request
         if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html" || lowerPath == "/admin.html" || lowerPath.indexOf("system volume information") != -1) {
             server.send(403, "text/plain", "Forbidden: Cannot download system files");
             return;
         }
 
+        //if file exists on sd Card -> tell browser to download
         if (SD_MMC.exists(path)) {
             File downloadFile = SD_MMC.open(path, "r");
             server.sendHeader("Content-Disposition", "attachment; filename=\"" + path.substring(path.lastIndexOf('/') + 1) + "\"");
@@ -277,11 +305,14 @@ String getContentType(String filename) {
     return "text/plain";
 }
 
+//acts as a "catch-all" for css, js, images, etc
 void handleStaticWebFiles() {
+    //determine requested file path from url
     String path = server.uri();
     
     // Allow the login page and background assets (like favicon) to bypass the auth redirect
     bool isPublicAsset = (path == "/login.html" || path.endsWith(".ico"));
+    //if the file is not a public asset and user is not authenticated, redirect to login
     if (!isPublicAsset && !isAuthenticated()) {
         server.sendHeader("Location", "/login.html");
         server.send(303);
@@ -291,6 +322,7 @@ void handleStaticWebFiles() {
     String lowerPath = path;
     lowerPath.toLowerCase();
 
+    //if the file is the admin page and user is not an admin, redirect to login
     if (lowerPath == "/admin.html" && !requireAdmin()) {
         server.sendHeader("Location", "/");
         server.send(303);
@@ -302,6 +334,7 @@ void handleStaticWebFiles() {
         return;
     }
 
+    //if files exists on sd card, stream to browser, with correct content type
     if (SD_MMC.exists(path)) {
         File file = SD_MMC.open(path, "r");
         server.streamFile(file, getContentType(path));
@@ -311,7 +344,9 @@ void handleStaticWebFiles() {
     server.send(404, "text/plain", "404: File Not Found");
 }
 
+
 void handleDelete() {
+    //require write access role (role+1)
     if (!requireWriteAccess()) { server.send(403, "text/plain", "Forbidden: Read-Only Account"); return; }
 
     if (server.hasArg("file")) {
@@ -321,11 +356,12 @@ void handleDelete() {
         String lowerPath = path;
         lowerPath.toLowerCase();
 
+        //cannot delete system files
         if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html" || lowerPath == "/admin.html" || lowerPath.indexOf("system volume information") != -1) {
             server.send(403, "text/plain", "Forbidden: Cannot delete system files");
             return;
         }
-
+        //if  file/folder deletion is successful on the sd card, log delete action to database return 200 success
         if (deleteFileOrFolder(path)) {
             Session* sess = getCurrentSession();
             if (sess) logActivity(sess->username, "DELETE", "Deleted item: " + path);
@@ -338,14 +374,17 @@ void handleDelete() {
 }
 
 void handleCreateFolder() {
+    // Verify that the current user is logged in and has at least Standard User (role 1+) permissions
     if (!requireWriteAccess()) { server.send(403, "text/plain", "Forbidden: Read-Only Account"); return; }
 
+    // Check if the required arguments ('dir' and 'name') are present in the HTTP request
     if (server.hasArg("dir") && server.hasArg("name")) {
         String dir = server.arg("dir");
         String name = server.arg("name");
 
-        // Input sanitization
+        // Input sanitization: Remove leading/trailing whitespace from the folder name
         name.trim();
+        // Ensure the parent directory path ends with a trailing slash
         if (!dir.endsWith("/")) dir += "/";
         if (name.startsWith("/")) name = name.substring(1);
 
@@ -357,31 +396,39 @@ void handleCreateFolder() {
 
         String fullPath = dir + name;
 
+        // Check if a file or folder already exists at the target location to prevent conflicts
         if (SD_MMC.exists(fullPath)) {
             server.send(409, "text/plain", "Folder already exists");
             return;
         }
 
+        // Attempt to create the directory on the SD card
         if (SD_MMC.mkdir(fullPath)) {
+            // If successful, log the action to the database activity log
             Session* sess = getCurrentSession();
             if (sess) logActivity(sess->username, "CREATE_FOLDER", "Created folder: " + fullPath);
             server.send(200, "text/plain", "Folder created successfully");
         } else {
+            // Return HTTP 500 Internal Server Error if the file system fails to create the directory
             server.send(500, "text/plain", "Failed to create folder on SD card");
         }
     } else {
+        // Return HTTP 400 Bad Request if the client didn't provide 'dir' or 'name'
         server.send(400, "text/plain", "Missing required arguments");
     }
 }
 
 void handleRename() {
+    // Verify that the current user is logged in and has at least Standard User (role 1+) permissions
     if (!requireWriteAccess()) { server.send(403, "text/plain", "Forbidden: Read-Only Account"); return; }
 
+    // Check if the required arguments ('oldPath' and 'newName') are present in the HTTP request
     if (server.hasArg("oldPath") && server.hasArg("newName")) {
         String oldPath = server.arg("oldPath");
         String newName = server.arg("newName");
 
         if (!oldPath.startsWith("/")) oldPath = "/" + oldPath;
+        // Remove leading/trailing whitespace from the new name
         newName.trim();
 
         // Input sanitization
@@ -390,19 +437,24 @@ void handleRename() {
             return;
         }
 
+        // Create a lowercase version of the old path for case-insensitive system file checks
         String lowerPath = oldPath;
         lowerPath.toLowerCase();
 
+        //protect critical system files
         if (lowerPath == "/index.db" || lowerPath == "/index.db-journal" || lowerPath == "/index.html" || lowerPath == "/login.html" || lowerPath == "/admin.html" || lowerPath.indexOf("system volume information") != -1) {
             server.send(403, "text/plain", "Forbidden: Cannot rename system files");
             return;
         }
 
+        // Verify that the target file/folder to be renamed actually exists on the SD card
         if (!SD_MMC.exists(oldPath)) {
             server.send(404, "text/plain", "Source file/folder not found");
             return;
         }
 
+        // Extract the parent directory from the old path
+        // ex: "/folder/subfolder/file.txt" becomes "/folder/subfolder/"
         int lastSlashIndex = oldPath.lastIndexOf('/');
         String parentDir = oldPath.substring(0, lastSlashIndex + 1);
         if (parentDir.length() == 0) parentDir = "/";
@@ -415,6 +467,7 @@ void handleRename() {
             return;
         }
 
+        // Check if the destination name already exists to prevent accidentally overwriting other files/folders
         if (SD_MMC.exists(newPath)) {
             server.send(409, "text/plain", "Destination already exists");
             return;
@@ -422,18 +475,21 @@ void handleRename() {
 
         if (SD_MMC.rename(oldPath, newPath)) {
             // Update the database to reflect the new name (this avoids having to do a full SD index)
-            // If it's a folder, we'd theoretically need to update all children's PARENT_DIR paths.
-            // For simplicity and to ensure total accuracy, we will just force the next /api/list call
+            // If it's a folder, we'd need to update all children's PARENT_DIR paths.
+            // For simplicity, we will just force the next /api/list call
             // to do a full re-index. The frontend currently forces an index=true on reload.
 
+            // Log the successful rename action into the database activity log
             Session* sess = getCurrentSession();
             if (sess) logActivity(sess->username, "RENAME", "Renamed: " + oldPath + " to " + newName);
 
             server.send(200, "text/plain", "Renamed successfully");
         } else {
+            // Return HTTP 500 Internal Server Error if the filesystem operation fails
             server.send(500, "text/plain", "Failed to rename on SD card");
         }
     } else {
+        // Return HTTP 400 Bad Request if the client didn't provide 'oldPath' or 'newName'
         server.send(400, "text/plain", "Missing required arguments");
     }
 }
@@ -442,19 +498,28 @@ static uint32_t currentUploadStartTime = 0;
 std::vector<float> globalUploadSpeeds;
 
 void handleUpload() {
+    // Verify that the current user is logged in and has at least Standard User (role 1+) permissions
     if (!requireWriteAccess()) return;
 
+    // Retrieve the current state and data of the incoming file upload
     HTTPUpload& upload = server.upload();
 
     if (upload.status == UPLOAD_FILE_START) {
-        trySyncTime(); // Sync time exactly when an upload begins
-        currentUploadStartTime = millis();
+        // STATE: Upload just started. Initialize parameters.
+
+        trySyncTime(); // Sync time exactly when an upload begins for accurate timestamps
+        currentUploadStartTime = millis(); // Track when the upload started to calculate speed later
+        
+        // Determine the target directory, defaulting to root "/" if not provided
         String dir = server.hasArg("dir") ? server.arg("dir") : "/";
         if (!dir.endsWith("/")) dir += "/";
+        
+        // Extract and sanitize the incoming file name
         String filename = upload.filename;
         if (filename.startsWith("/")) filename = filename.substring(1);
         String path = dir + filename;
 
+        // Security check: Prevent users from uploading files into protected system directories
         String lowerPath = path;
         lowerPath.toLowerCase();
         if (lowerPath.indexOf("system volume information") != -1) {
@@ -463,25 +528,34 @@ void handleUpload() {
         }
 
         Serial.printf("Receiving File: %s\n", path.c_str());
+        // Open the file on the SD card in write mode. This will create a new file or overwrite an existing one.
         fsUploadFile = SD_MMC.open(path, FILE_WRITE);
 
     } else if (upload.status == UPLOAD_FILE_WRITE) {
+        // STATE: Receiving data chunks. This block runs multiple times for larger files.
+        
+        // If the file was successfully opened in the START phase, write the incoming byte chunk to the SD card
         if (fsUploadFile) {
             fsUploadFile.write(upload.buf, upload.currentSize);
         }
     } else if (upload.status == UPLOAD_FILE_END) {
+        // STATE: Upload completely finished. Clean up and log.
+        
         if (fsUploadFile) {
+            // Close the file system handle to flush remaining data and free up the lock
             fsUploadFile.close();
             
+            // Reconstruct the target path (needed again because the upload object state resets between calls)
             String dir = server.hasArg("dir") ? server.arg("dir") : "/";
             if (!dir.endsWith("/")) dir += "/";
             String filename = upload.filename;
             if (filename.startsWith("/")) filename = filename.substring(1);
             String path = dir + filename;
 
-            // Calculate global upload speed and store it in RAM
+            // Calculate global upload speed and store it in RAM for the Admin Panel graph
             uint32_t duration = millis() - currentUploadStartTime;
             if (duration > 0 && upload.totalSize > 0) {
+                // Formula: (Total Bytes * 8 bits / 1 Megabit) / (Duration ms / 1000 seconds) = Mbps
                 float mbps = ((upload.totalSize * 8.0) / (1024.0 * 1024.0)) / (duration / 1000.0);
                 globalUploadSpeeds.push_back(mbps);
                 
@@ -489,6 +563,7 @@ void handleUpload() {
                 if (globalUploadSpeeds.size() > 100) globalUploadSpeeds.erase(globalUploadSpeeds.begin());
             }
 
+            // Log the successful file upload action into the database activity log
             Session* sess = getCurrentSession();
             if (sess) logActivity(sess->username, "UPLOAD", "Uploaded file: " + path);
             Serial.printf("Upload Complete: %s, Size: %u bytes\n", upload.filename.c_str(), upload.totalSize);
@@ -547,41 +622,52 @@ void handleAdminUsersGet() {
 }
 
 void handleAdminRolesPost() {
+    // Ensure the requester is logged in and has at least Admin (role 2+) privileges
     if (!requireAdmin()) { server.send(403, "text/plain", "Forbidden"); return; }
 
+    // Verify that both the target username and the new requested role were provided
     if (server.hasArg("username") && server.hasArg("role")) {
         String username = server.arg("username");
         int newRole = server.arg("role").toInt();
 
+        // Fetch the current admin's session to check their specific role level
         Session* sess = getCurrentSession();
         
-        // Fetch target user's current role
+        // Query the database to find the current role of the target user
         int targetRole = -1;
         sqlite3_stmt *stmtRole;
         if (sqlite3_prepare_v2(db, "SELECT ROLE FROM USERS WHERE USERNAME = ?;", -1, &stmtRole, NULL) == SQLITE_OK) {
             sqlite3_bind_text(stmtRole, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+            // If a row is returned, extract the integer role value
             if (sqlite3_step(stmtRole) == SQLITE_ROW) targetRole = sqlite3_column_int(stmtRole, 0);
             sqlite3_finalize(stmtRole);
         }
 
+        // If the targetRole is still -1, the user does not exist in the database
         if (targetRole == -1) { server.send(404, "text/plain", "User not found"); return; }
 
-        // Security: Cannot modify someone of equal or higher rank, and cannot promote someone to your rank or higher
+        // Enforce hierarchical security rules
+        // Cannot demote or alter an account that is equal to or outranks you
         if (targetRole >= sess->role) {
             server.send(403, "text/plain", "Cannot modify users of equal or higher rank"); return;
         }
+        // Rule B: Cannot grant permissions that you yourself do not possess (or equal your own)
         if (newRole >= sess->role) {
             server.send(403, "text/plain", "Cannot promote user to your rank or higher"); return;
         }
 
+        // Prepare the database update statement
         sqlite3_stmt *stmt;
         const char *sql = "UPDATE USERS SET ROLE = ? WHERE USERNAME = ?;";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, newRole);
             sqlite3_bind_text(stmt, 2, username.c_str(), -1, SQLITE_TRANSIENT);
 
+            // Execute the update query
             if (sqlite3_step(stmt) == SQLITE_DONE) {
-                // Remove existing sessions for this user so they have to login again
+                // Immediately invalidate active sessions for the modified user.
+                // This forces them to log in again so the system issues a new session token 
+                // bound to their newly assigned permission level.
                 for (auto it = activeSessions.begin(); it != activeSessions.end(); ) {
                     if (it->username == username) {
                         it = activeSessions.erase(it);
@@ -591,31 +677,36 @@ void handleAdminRolesPost() {
                 }
                 server.send(200, "text/plain", "Role updated successfully");
             } else {
+                // Database execution failure
                 server.send(500, "text/plain", "Failed to update role");
             }
             sqlite3_finalize(stmt);
         } else {
+             // SQL compilation/preparation failure
              server.send(500, "text/plain", "Database error");
         }
     } else {
+        // Missing POST data
         server.send(400, "text/plain", "Missing arguments");
     }
 }
 
 void handleAdminUsersDelete() {
+    // Ensure the current user has at least Admin privileges
     if (!requireAdmin()) { server.send(403, "text/plain", "Forbidden"); return; }
 
     if (server.hasArg("username")) {
         String username = server.arg("username");
 
-        // Prevent deleting oneself
+        // Security check: Prevent the admin from accidentally (or maliciously) deleting their own account
         Session* sess = getCurrentSession();
         if (sess && sess->username == username) {
             server.send(400, "text/plain", "Cannot delete yourself");
             return;
         }
 
-        // Fetch target user's current role to prevent an Admin from deleting a Master Admin
+        // Security check: Fetch target user's current role from the database.
+        // This is necessary to enforce the hierarchy (cannot delete equal or higher rank).
         int targetRole = -1;
         sqlite3_stmt *stmtRole;
         if (sqlite3_prepare_v2(db, "SELECT ROLE FROM USERS WHERE USERNAME = ?;", -1, &stmtRole, NULL) == SQLITE_OK) {
@@ -624,17 +715,22 @@ void handleAdminUsersDelete() {
             sqlite3_finalize(stmtRole);
         }
 
+        // Block the deletion if the target outranks or equals the current admin
         if (targetRole >= sess->role) {
             server.send(403, "text/plain", "Cannot delete users of equal or higher rank");
             return;
         }
 
+        // Prepare the SQL statement to delete the user
         sqlite3_stmt *stmt;
         const char *sql = "DELETE FROM USERS WHERE USERNAME = ?;";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+            
+            // Execute the deletion
             if (sqlite3_step(stmt) == SQLITE_DONE) {
-                // Remove existing sessions
+                // If successfully deleted from DB, invalidate any active login sessions
+                // This kicks the deleted user out if they are currently browsing the NAS
                 for (auto it = activeSessions.begin(); it != activeSessions.end(); ) {
                     if (it->username == username) {
                         it = activeSessions.erase(it);
@@ -656,31 +752,44 @@ void handleAdminUsersDelete() {
 }
 
 static int build_logs_json_callback(void *data, int argc, char **argv, char **azColName) {
+    // Cast the void pointer back to our String pointer where we are accumulating the JSON
     String* json = (String*)data;
+    
+    // Add a comma to separate array objects, unless this is the very first object
     if (json->length() > 0) *json += ",";
 
+    // Extract row data, falling back to defaults if null
     String username = argv[0] ? argv[0] : "Unknown";
     String action = argv[1] ? argv[1] : "UNKNOWN";
     String details = argv[2] ? argv[2] : "";
     String timestamp = argv[3] ? argv[3] : "0";
 
-    details.replace("\"", "\\\""); // Escape double quotes inside the JSON string
-
+    // Escape any internal double-quotes in the details string to prevent breaking the JSON structure
+    details.replace("\"", "\\\"");
+    
+    // Format the row into a JSON object and append it to our main string
     *json += "{\"username\":\"" + username + "\",\"action\":\"" + action + "\",\"details\":\"" + details + "\",\"timestamp\":" + timestamp + "}";
     return 0;
 }
 
 void handleAdminLogsGet() {
+    // Ensure the current user has at least Admin privileges
     if (!requireAdmin()) { server.send(403, "text/plain", "Forbidden"); return; }
+    
     String jsonResult = "";
+    // Query the database for the 100 most recent log entries, ordered newest first
     const char* sql = "SELECT USERNAME, ACTION, DETAILS, TIMESTAMP FROM ACTIVITY_LOG ORDER BY TIMESTAMP DESC LIMIT 100;";
     sqlite3_exec(db, sql, build_logs_json_callback, (void*)&jsonResult, NULL);
+    
+    // Wrap the accumulated comma-separated objects in brackets to form a valid JSON array
     server.send(200, "application/json", "[" + jsonResult + "]");
 }
 
 void handleAdminNetwork() {
+    // Ensure the current user has at least Admin privileges
     if (!requireAdmin()) { server.send(403, "text/plain", "Forbidden"); return; }
     
+    // Manually construct the JSON payload with system hardware and network metrics
     String json = "{";
     json += "\"clients\":" + String(WiFi.softAPgetStationNum()) + ",";
     json += "\"mac\":\"" + WiFi.softAPmacAddress() + "\",";
@@ -688,6 +797,7 @@ void handleAdminNetwork() {
     json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
     json += "\"totalHeap\":" + String(ESP.getHeapSize());
     
+    // Append the array of historical upload speeds (in Mbps)
     json += ",\"uploadSpeeds\":[";
     for (size_t i = 0; i < globalUploadSpeeds.size(); ++i) {
         json += String(globalUploadSpeeds[i], 2);
@@ -695,11 +805,12 @@ void handleAdminNetwork() {
     }
     json += "]}";
     
+    // Send the completed payload back to the browser
     server.send(200, "application/json", json);
 }
 
 void handleApiPing() {
-    // Simple ultra-fast endpoint to measure latency
+    // Simple endpoint to measure latency
     server.send(200, "text/plain", "pong");
 }
 
@@ -722,16 +833,21 @@ void handleSpeedTestGet() {
         delay(1); // Yield to prevent watchdog crash during tight loop
     }
 }
-
+//Maps incoming HTTP requests to their corresponding handler functions based on the URL and HTTP method.
 void initWebServer() {
 
+    // Configure the server to collect specific HTTP headers from incoming requests.
+    // We need to extract the "Cookie" header to manage and authenticate user sessions.
     const char* headerkeys[] = {"Cookie"};
     size_t headerkeyssize = sizeof(headerkeys) / sizeof(char*);
     server.collectHeaders(headerkeys, headerkeyssize);
 
+    // Authentication & User Management Routes
     server.on("/login", HTTP_POST, handleLogin);
     server.on("/register", HTTP_POST, handleRegister);
     server.on("/api/logout", HTTP_POST, handleLogout);
+
+    // Core File System & Navigation Routes
     server.on("/", handleRoot);
     server.on("/api/list", HTTP_GET, handleApiList);
     server.on("/api/search", HTTP_GET, handleApiSearch);
@@ -743,6 +859,8 @@ void initWebServer() {
     // Open endpoint so the browser can sync time before logging in
     server.on("/api/time", HTTP_POST, handleTimeSync);
 
+    // File Upload Route (Multipart form-data)
+    // Uses an inline lambda function for the standard response, but handles the stream chunks via 'handleUpload'
     server.on("/upload", HTTP_POST, []() {
         if (!requireWriteAccess()) { server.send(401, "text/plain", "Unauthorized"); return; }
         server.send(200, "text/plain", "Upload complete");
@@ -757,6 +875,7 @@ void initWebServer() {
     }, []() { HTTPUpload& upload = server.upload(); }); // Empty upload handler to consume and discard dummy data
 
 
+    // Admin specific endpoints for managing the system, user roles, and viewing logs
     server.on("/api/me", HTTP_GET, handleApiMe);
     server.on("/api/admin/users", HTTP_GET, handleAdminUsersGet);
     server.on("/api/admin/roles", HTTP_POST, handleAdminRolesPost);
@@ -764,8 +883,10 @@ void initWebServer() {
     server.on("/api/admin/logs", HTTP_GET, handleAdminLogsGet);
     server.on("/api/admin/network", HTTP_GET, handleAdminNetwork);
 
+    // Catch-all handler for serving static files (HTML, CSS, JS, Images) from the SD card
     server.onNotFound(handleStaticWebFiles);
 
+    // Start the HTTP server listening on port 80
     server.begin();
     Serial.println("Web Server Ready. Go to 192.168.4.1");
 }

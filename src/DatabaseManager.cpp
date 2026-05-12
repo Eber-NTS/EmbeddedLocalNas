@@ -43,6 +43,7 @@ bool initDatabase() {
         // Master Admin is assigned Role 3
         sqlite3_exec(db, "INSERT OR IGNORE INTO USERS (USERNAME, PASSWORD, ROLE) VALUES ('admin', 'admin', 3);", NULL, NULL, NULL);
         // Force upgrade the 'admin' account to Master Admin in case it already existed as a lower role
+        // Ensure there is always a master admin account to prevent locking ourselves out
         sqlite3_exec(db, "UPDATE USERS SET ROLE = 3 WHERE USERNAME = 'admin';", NULL, NULL, NULL);
         
         return true;
@@ -58,6 +59,8 @@ void indexInternalDrive(String targetDir) {
     sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, NULL);
     
     // Deletes only the records for the specific directory being re-indexed.
+    // Clear out the old cached data ONLY for the folder we are currently looking at
+    //DELETE all records in FILES table where ParentDirectory == targetDirectory
     char* deleteQuery = sqlite3_mprintf("DELETE FROM FILES WHERE PARENT_DIR = '%q';", targetDir.c_str());
     sqlite3_exec(db, deleteQuery, NULL, NULL, NULL);
     sqlite3_free(deleteQuery);
@@ -70,6 +73,8 @@ void indexInternalDrive(String targetDir) {
         return;
     }
 
+    // Iterate through every physical file in the folder
+    //FOR each physical_file IN targetDirectory:
     File file = root.openNextFile();
     while (file) {
         String fileName = file.name();
@@ -126,10 +131,12 @@ bool createUser(String username, String password, int role) {
 
 // Returns the role of the user if valid, otherwise -1
 int verifyUser(String username, String password) {
+    //PREPARE a SEARCH statement to find the Password and Role for the given username
     sqlite3_stmt *stmt;
     int role = -1;
     const char *sql = "SELECT PASSWORD, ROLE FROM USERS WHERE USERNAME = ?;";
-    
+
+    //if user exists in database -> if database password matches provided password -> return user's role
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
         
@@ -145,9 +152,13 @@ int verifyUser(String username, String password) {
 }
 
 void logActivity(String username, String action, String details) {
+
+   // prepare an insert statement for the ACTIVITY_LOG table
+    //attach username, action (like "UPLOAD"), details (like "file.txt"), and Current System Time
     sqlite3_stmt *stmt;
     const char *sql = "INSERT INTO ACTIVITY_LOG (USERNAME, ACTION, DETAILS, TIMESTAMP) VALUES (?, ?, ?, ?);";
-    
+
+    //execute the statement. Silently tracks user behavior for the Admin panel.
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(stmt, 2, action.c_str(), -1, SQLITE_TRANSIENT);
