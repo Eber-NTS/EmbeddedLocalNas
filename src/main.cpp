@@ -38,10 +38,9 @@ void setup() {
 
 //This is the main loop.
 void loop() {
-    //actively checks for incoming http request.
-    //When the function looks at a url request it matches to appropriate routes in initWebServer()
-    //if user asked for /api/list, handleClient() pauses the loop and instead executes the handleAPIList() c++ function
-    //if User asks for /upload, the handleUpload() function is called
+    // Actively listen for incoming HTTP requests from connected browsers
+    // If a request is found, pause this loop and execute the linked route (e.g., handleUpload)
+    //PROCESS incoming web client requests()
     handleClient();
     delay(1); // Yields CPU time to the background Wi-Fi radio tasks, preventing packet loss
 }

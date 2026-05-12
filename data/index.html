@@ -47,6 +47,13 @@
             background-color: #3d3d3d;
             border-color: #4daafc;
         }
+        
+        .file-date { flex: 1; color: #aaa; text-align: center; display: none; }
+        .file-size { flex: 1; color: #aaa; text-align: center; display: none; }
+        
+        /* Only show Size column if screen is wider than 400px, and Date if wider than 600px */
+        @media (min-width: 400px) { .file-size { display: block; } }
+        @media (min-width: 600px) { .file-date { display: block; } }
     </style>
 </head>
 <body>
@@ -440,8 +447,8 @@
                     <div style="flex: 2; display: flex; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                         <span style="font-size: 24px; margin-right: 15px;">${icon}</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${file.name}</span>
                     </div>
-                    <div style="flex: 1; color: #aaa; text-align: center; display: none; @media (min-width: 600px) { display: block; }">${dateText}</div>
-                    <div style="flex: 1; color: #aaa; text-align: center; display: none; @media (min-width: 400px) { display: block; }">${sizeText}</div>
+                    <div class="file-date">${dateText}</div>
+                    <div class="file-size">${sizeText}</div>
                     <div style="flex: 1; text-align: right; min-width: max-content;">${primaryAction}${deleteAction}</div>
                 </div>
             `;
@@ -549,8 +556,8 @@
                             <small style="color: #666; margin-left: 39px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${file.parentDir}</small>
                         </div>
                     </div>
-                    <div style="flex: 1; color: #aaa; text-align: center; display: none; @media (min-width: 600px) { display: block; }">${dateText}</div>
-                    <div style="flex: 1; color: #aaa; text-align: center; display: none; @media (min-width: 400px) { display: block; }">${sizeText}</div>
+                    <div class="file-date">${dateText}</div>
+                    <div class="file-size">${sizeText}</div>
                     <div style="flex: 1; text-align: right; min-width: max-content;">${primaryAction}${deleteAction}</div>
                 </div>
             `;
